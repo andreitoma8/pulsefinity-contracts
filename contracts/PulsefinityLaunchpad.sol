@@ -11,8 +11,11 @@ import "./interfaces/IVestingContract.sol";
 /**
  * TODO:
  * - add checks for buyer tier and contribution limits
- * - add support for ERC20 tokens as payment
- * - implement support for token decimals
+ * - add support for ERC20 tokens as payment - done
+ * - unit tests for all contracts -
+ * - integration tests -
+ * - code refactor -
+ * - gas optimizations -
  */
 
 /**
@@ -32,13 +35,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
 
     struct SaleParams {
         IERC20Metadata token; // The token being sold
+        IERC20Metadata paymentToken; // The token used to buy the sale token(address(0) = PLS)
         address owner; // The owner of the sale
         uint256 tokenAmount; // The amount of tokens being sold
-        uint256 price; // How many tokens per 1 ETH (if 0, then it's a fair launch)
-        uint256 softCap; // in PLS
+        uint256 price; // How many tokens per 1 payment token (if 0, then it's a fair launch)
+        uint256 softCap; // in Payment Tokens
         uint256 hardCap; // must be double of softCap
         uint256 liquidityPercentage; // BPS
-        uint256 listingPrice; // How many tokens per 1 ETH
+        uint256 listingPrice; // How many tokens per 1 payment token
         uint256 liquidityLockupTime; // in days
         uint256 startTimestamp; // Unix timestamp
         uint256 endTimestamp; // Unix timestamp
@@ -54,7 +58,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         bool saleEnabled; // true if sale is enabled and accepting contributions
         bool softCapReached; // true if soft cap is reached
         bool saleEnded; // true if sale is ended
-        uint256 totalPlsContributed; // total PLS/payment token contributed
+        uint256 totalPaymentTokenContributed; // total PLS/payment token contributed
         uint256 liquidityUnlockTimestamp; // Unix timestamp
         SaleParams saleParams; // SaleParams struct
     }
@@ -69,6 +73,11 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
      * @notice Mapping of sale ID to SaleState struct
      */
     mapping(uint256 => SaleState) public sales;
+
+    /**
+     * @notice Mapping of supported payment tokens(address(0) = PLS)
+     */
+    mapping(address => bool) public supportedPaymentTokens;
 
     /**
      * @notice Mapping of buyer address to sale ID to amount contributed
@@ -89,6 +98,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         _setupRole(ADMIN_ROLE, msg.sender);
         pulseRouter = _pulseXRouter;
         pulseFactory = _pulseXFactory;
+
+        supportedPaymentTokens[address(0)] = true;
     }
 
     /**
@@ -126,50 +137,52 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
     }
 
     /**
-     * @notice Function used by admins to enable a sale
-     * @param _saleId The ID of the sale to enable
-     */
-    function enableSale(uint256 _saleId) external onlyRole(ADMIN_ROLE) {
-        sales[_saleId].saleEnabled = true;
-    }
-
-    /**
      * @notice Function used by users to contribute to a sale
      * @param _saleId The ID of the sale to contribute to
      */
-    function contribute(uint256 _saleId) external payable {
+    function contribute(uint256 _saleId, uint256 _amount) external payable {
         SaleState storage sale = sales[_saleId];
         SaleParams memory saleParams = sale.saleParams;
 
+        if (address(saleParams.paymentToken) != address(0)) {
+            // Transfer the payment token to the contract
+            saleParams.paymentToken.transferFrom(msg.sender, address(this), _amount);
+        } else {
+            _amount = msg.value;
+        }
         // Check if the sale is enabled and accepting contributions
         require(sale.saleEnabled, "Sale is not enabled");
         require(block.timestamp >= saleParams.startTimestamp, "Sale has not started yet");
         require(block.timestamp <= saleParams.endTimestamp, "Sale has ended");
-        require(sale.totalPlsContributed < saleParams.hardCap, "Sale has ended");
+        require(sale.totalPaymentTokenContributed < saleParams.hardCap, "Sale has ended");
 
         // TODO: add checks for buyer tier and contribution limits
 
         // Update contribution and total contribution amounts
-        amountContributed[msg.sender][_saleId] += msg.value;
-        sale.totalPlsContributed += msg.value;
+        amountContributed[msg.sender][_saleId] += _amount;
+        sale.totalPaymentTokenContributed += _amount;
 
         // Check if the soft cap is reached
-        if (sale.totalPlsContributed >= saleParams.softCap) {
+        if (sale.totalPaymentTokenContributed >= saleParams.softCap) {
             sale.softCapReached = true;
         }
 
         // Check if the hard cap is reached
         // For fair launches, the hard cap is 2^256 - 1, so this check will always fail
-        if (sale.totalPlsContributed >= saleParams.hardCap) {
+        if (sale.totalPaymentTokenContributed >= saleParams.hardCap) {
             // Refund the user if they contributed more than the hard cap
-            if (sale.totalPlsContributed > saleParams.hardCap) {
-                uint256 refundAmount = sale.totalPlsContributed - saleParams.hardCap;
+            if (sale.totalPaymentTokenContributed > saleParams.hardCap) {
+                uint256 refundAmount = sale.totalPaymentTokenContributed - saleParams.hardCap;
 
-                sale.totalPlsContributed -= refundAmount;
+                sale.totalPaymentTokenContributed -= refundAmount;
                 amountContributed[msg.sender][_saleId] -= refundAmount;
 
-                (bool sc,) = payable(msg.sender).call{value: refundAmount}("");
-                require(sc, "Transfer failed");
+                if (address(saleParams.paymentToken) != address(0)) {
+                    saleParams.paymentToken.transfer(msg.sender, refundAmount);
+                } else {
+                    (bool sc,) = payable(msg.sender).call{value: refundAmount}("");
+                    require(sc, "Transfer failed");
+                }
             }
         }
     }
@@ -195,7 +208,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
             //  the amount contributed and the total tokens available for the sale
             if (saleParams.price == 0) {
                 tokensBought =
-                    amountContributed[msg.sender][_saleId] * saleParams.tokenAmount / sale.totalPlsContributed;
+                    amountContributed[msg.sender][_saleId] * saleParams.tokenAmount / sale.totalPaymentTokenContributed;
             } else {
                 // If the sale is a presale, calculate the amount of tokens bought using
                 // the amount contributed and the price
@@ -228,10 +241,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
             }
         } else {
             // If the soft cap is not reached, refund the user their contribution
-            uint256 plsContributed = amountContributed[msg.sender][_saleId];
+            uint256 paymentTokenContributed = amountContributed[msg.sender][_saleId];
             amountContributed[msg.sender][_saleId] = 0;
-            (bool sc,) = payable(msg.sender).call{value: plsContributed}("");
-            require(sc, "Transfer failed");
+            if (address(saleParams.paymentToken) != address(0)) {
+                saleParams.paymentToken.transfer(msg.sender, paymentTokenContributed);
+            } else {
+                (bool sc,) = payable(msg.sender).call{value: paymentTokenContributed}("");
+                require(sc, "Transfer failed");
+            }
         }
     }
 
@@ -248,7 +265,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
 
         // Check if the sale has reached the end timestamp or the hard cap
         if (block.timestamp < saleParams.endTimestamp) {
-            require(sale.totalPlsContributed == saleParams.hardCap, "Sale has not reached hard cap");
+            require(sale.totalPaymentTokenContributed == saleParams.hardCap, "Sale has not reached hard cap");
         } else {
             require(block.timestamp >= saleParams.endTimestamp, "Sale has not ended yet");
         }
@@ -259,38 +276,54 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         // If the soft cap is reached, substract the winner fee, create and lock LP tokens and send the rest to the owner
         if (sale.softCapReached) {
             // Calculate the winner fee and the amount raised after the fee
-            uint256 winnerFee = sale.totalPlsContributed * WINNER_FEE / 10000;
+            uint256 winnerFee = sale.totalPaymentTokenContributed * WINNER_FEE / 10000;
             feePool += winnerFee;
-            uint256 raisedAfterFee = sale.totalPlsContributed - winnerFee;
+            uint256 raisedAfterFee = sale.totalPaymentTokenContributed - winnerFee;
 
             // Calculate the amount of PLS/payment tokens and sold tokens to add liquidity with
-            uint256 plsForLiquidity = raisedAfterFee * saleParams.liquidityPercentage / 10000;
+            uint256 paymentTokenForLiquidity = raisedAfterFee * saleParams.liquidityPercentage / 10000;
             uint256 tokensForLiquidity;
             if (saleParams.price != 0) {
                 // If the sale is a presale, calculate the amount of tokens to add liquidity
                 // with using the listing price
-                tokensForLiquidity = plsForLiquidity * saleParams.listingPrice / 1e18;
+                tokensForLiquidity = paymentTokenForLiquidity * saleParams.listingPrice / 1e18;
             } else {
                 // If the sale is a fair launch, calculate the amount of tokens to add liquidity
                 // with using the total tokens available for the sale
-                tokensForLiquidity = plsForLiquidity * saleParams.tokenAmount / raisedAfterFee;
+                tokensForLiquidity = paymentTokenForLiquidity * saleParams.tokenAmount / raisedAfterFee;
             }
 
             // Approve and add liquidity to the pool on PulseX
             saleParams.token.approve(address(pulseRouter), tokensForLiquidity);
-            pulseRouter.addLiquidityETH{value: plsForLiquidity}(
-                address(saleParams.token),
-                tokensForLiquidity,
-                tokensForLiquidity,
-                plsForLiquidity,
-                address(this),
-                block.timestamp + 1 days
-            );
+            if (address(saleParams.paymentToken) != address(0)) {
+                saleParams.paymentToken.approve(address(pulseRouter), paymentTokenForLiquidity);
+                pulseRouter.addLiquidity(
+                    address(saleParams.token),
+                    address(saleParams.paymentToken),
+                    tokensForLiquidity,
+                    paymentTokenForLiquidity,
+                    tokensForLiquidity,
+                    paymentTokenForLiquidity,
+                    address(this),
+                    block.timestamp + 1 days
+                );
+            } else {
+                pulseRouter.addLiquidityETH{value: paymentTokenForLiquidity}(
+                    address(saleParams.token),
+                    tokensForLiquidity,
+                    tokensForLiquidity,
+                    paymentTokenForLiquidity,
+                    address(this),
+                    block.timestamp + 1 days
+                );
+            }
 
             // Lock the liquidity tokens and create a vesting schedule for the owner
             sale.liquidityUnlockTimestamp = block.timestamp + saleParams.liquidityLockupTime * 1 days;
-            address liquidityPool =
-                IPulseXFactory(pulseRouter.factory()).getPair(address(saleParams.token), pulseRouter.WPLS());
+            address liquidityPool = IPulseXFactory(pulseRouter.factory()).getPair(
+                address(saleParams.token),
+                address(saleParams.paymentToken) == address(0) ? pulseRouter.WPLS() : address(saleParams.paymentToken)
+            );
             uint256 liquidity = IERC20(liquidityPool).balanceOf(address(this));
             vestingContract.createVestingSchedule(
                 liquidityPool,
@@ -302,9 +335,9 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
             );
 
             // If the sale is a presale and the hard cap is not reached
-            if (saleParams.price > 0 && saleParams.hardCap != sale.totalPlsContributed) {
+            if (saleParams.price > 0 && saleParams.hardCap != sale.totalPaymentTokenContributed) {
                 // Calculate the amount of tokens to refund from unslod tokens
-                uint256 totalTokensBought = sale.totalPlsContributed * saleParams.price / 1e18;
+                uint256 totalTokensBought = sale.totalPaymentTokenContributed * saleParams.price / 1e18;
                 uint256 refundAmount = saleParams.hardCap * saleParams.price / 1e18 - totalTokensBought;
                 // Calculate the amount of tokens to refund from unused tokens for liquidity
                 uint256 totalDepositForLiquidity =
@@ -317,7 +350,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
                 }
             }
             // Send the raised funds to the owner
-            uint256 fundsToSend = raisedAfterFee - plsForLiquidity;
+            uint256 fundsToSend = raisedAfterFee - paymentTokenForLiquidity;
 
             (bool sc,) = payable(saleParams.owner).call{value: fundsToSend}("");
             require(sc, "Transfer failed");
@@ -341,6 +374,23 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
     }
 
     /**
+     * @notice Function used by admins to enable a sale
+     * @param _saleId The ID of the sale to enable
+     */
+    function enableSale(uint256 _saleId) external onlyRole(ADMIN_ROLE) {
+        sales[_saleId].saleEnabled = true;
+    }
+
+    /**
+     * @notice Function used by admins to add or remove a token from the supported payment tokens list
+     * @param _token The address of the token to set the state for
+     * @param _state True if the token is supported, false otherwise
+     */
+    function setPaymentTokenState(address _token, bool _state) external onlyRole(ADMIN_ROLE) {
+        supportedPaymentTokens[_token] = _state;
+    }
+
+    /**
      * @notice Function used by the owner to withdraw tokens from the fee pool
      * @param _amount Amount to withdraw from the fee pool
      */
@@ -353,6 +403,9 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
 
     function _checkSaleParams(SaleParams memory _saleParams) private view {
         require(_saleParams.token != IERC20(address(0)), "Token cannot be 0 address");
+        if (address(_saleParams.paymentToken) != address(0)) {
+            require(supportedPaymentTokens[address(_saleParams.paymentToken)], "Payment token not supported");
+        }
         require(_saleParams.owner != address(0), "Owner cannot be 0 address");
         require(_saleParams.softCap > 0, "Soft cap must be greater than 0");
         require(_saleParams.hardCap > 0, "Hard cap must be greater than 0");
