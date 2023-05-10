@@ -2,9 +2,9 @@
 pragma solidity >=0.6.2;
 
 interface IPulseXRouter01 {
-    function factory() external pure returns (address);
+    function factory() external view returns (address);
 
-    function WPLS() external pure returns (address);
+    function WPLS() external view returns (address);
 
     function addLiquidityETH(
         address token,
