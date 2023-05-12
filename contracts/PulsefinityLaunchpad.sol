@@ -7,6 +7,7 @@ import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
 import "./interfaces/IPulseXRouter01.sol";
 import "./interfaces/IPulseXFactory.sol";
 import "./interfaces/IVestingContract.sol";
+import "./interfaces/IStakingRouter.sol";
 
 /**
  * TODO:
@@ -29,6 +30,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     uint256 public constant WINNER_FEE = 2000; // 20% in BPS
 
+    IStakingRouter public stakingRouter;
     IPulseXRouter01 public pulseRouter;
     IPulseXFactory public pulseFactory;
     IVestingContract public vestingContract;
@@ -70,6 +72,11 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
     CountersUpgradeable.Counter private _saleIdTracker;
 
     /**
+     * @notice Mapping of Tier to weight
+     */
+    mapping(Tier => uint256) public tierWeights;
+
+    /**
      * @notice Mapping of sale ID to SaleState struct
      */
     mapping(uint256 => SaleState) public sales;
@@ -84,6 +91,11 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
      */
     mapping(address => mapping(uint256 => uint256)) public amountContributed;
 
+    /**
+     * @notice Mapping of sale ID to Tier to amount contributed
+     */
+    mapping(uint256 => mapping(Tier => uint256)) public amountContributedPerTier;
+
     constructor() {
         _disableInitializers();
     }
@@ -93,9 +105,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
      * @param _pulseXRouter The PulseXRouter contract
      * @param _pulseXFactory The PulseXFactory contract
      */
-    function initialize(IPulseXRouter01 _pulseXRouter, IPulseXFactory _pulseXFactory) external initializer {
+    function initialize(IStakingRouter _stakingRouter, IPulseXRouter01 _pulseXRouter, IPulseXFactory _pulseXFactory)
+        external
+        initializer
+    {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(ADMIN_ROLE, msg.sender);
+
+        stakingRouter = _stakingRouter;
         pulseRouter = _pulseXRouter;
         pulseFactory = _pulseXFactory;
 
@@ -157,6 +174,13 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         require(sale.totalPaymentTokenContributed < saleParams.hardCap, "Sale has ended");
 
         // TODO: add checks for buyer tier and contribution limits
+        Tier buyerTier = stakingRouter.getTier(msg.sender);
+        if (saleParams.price == 0) {
+            require(buyerTier > Tier.Null, "Buyer tier is too low");
+        } else {
+            uint256 tierAllocation = getTierAllocation(_saleId, buyerTier);
+            require(amountContributed[msg.sender][_saleId] + _amount <= tierAllocation, "Allocation exceeded");
+        }
 
         // Update contribution and total contribution amounts
         amountContributed[msg.sender][_saleId] += _amount;
@@ -401,6 +425,24 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         require(sc, "Transfer failed");
     }
 
+    /**
+     * @notice Function used to get the allocation for a tier in a sale
+     * @param _saleId The ID of the sale to get the allocation for
+     * @param _buyerTier The tier of the buyer
+     */
+    function getTierAllocation(uint256 _saleId, Tier _buyerTier) public view returns (uint256) {
+        uint256[6] memory stakersPerTier = stakingRouter.getStakersPerTier();
+        uint256 totalAllocationShares;
+        for (uint256 i = 0; i < stakersPerTier.length; i++) {
+            totalAllocationShares += stakersPerTier[i] * tierWeights[_buyerTier];
+        }
+        return sales[_saleId].saleParams.hardCap * tierWeights[_buyerTier] / totalAllocationShares;
+    }
+
+    /**
+     * @notice Function used to check the sale parameters on creation
+     * @param _saleParams The sale parameters to check
+     */
     function _checkSaleParams(SaleParams memory _saleParams) private view {
         require(_saleParams.token != IERC20(address(0)), "Token cannot be 0 address");
         if (address(_saleParams.paymentToken) != address(0)) {
