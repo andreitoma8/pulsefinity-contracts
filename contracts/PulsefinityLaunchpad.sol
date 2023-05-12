@@ -96,6 +96,18 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
      */
     mapping(uint256 => mapping(Tier => uint256)) public amountContributedPerTier;
 
+    event SaleCreated(address indexed owner, uint256 indexed saleId);
+
+    event SaleEnabled(uint256 indexed saleId);
+
+    event SaleEnded(uint256 indexed saleId, bool softCapReached);
+
+    event ContributionMade(address indexed buyer, uint256 indexed saleId, uint256 amount);
+
+    event TokensClaimed(address indexed buyer, uint256 indexed saleId, uint256 amount);
+
+    event TokensRefunded(address indexed buyer, uint256 indexed saleId, uint256 amount);
+
     constructor() {
         _disableInitializers();
     }
@@ -151,6 +163,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
 
         // Transfer the tokens to the contract
         _saleParams.token.transferFrom(msg.sender, address(this), totalTokensForSale + tokensForLiquidity);
+
+        emit SaleCreated(msg.sender, saleId);
     }
 
     /**
@@ -209,6 +223,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
                 }
             }
         }
+
+        emit ContributionMade(msg.sender, _saleId, _amount);
     }
 
     /**
@@ -222,8 +238,10 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         // Check if the sale is ended
         require(sales[_saleId].saleEnded, "Sale has not ended");
 
+        uint256 contributed = amountContributed[msg.sender][_saleId];
+
         // Check if the user has contributed to this sale
-        require(amountContributed[msg.sender][_saleId] > 0, "Nothing to claim");
+        require(contributed > 0, "Nothing to claim");
 
         // Check if the soft cap is reached, send the tokens to the user/vesting contract
         if (sale.softCapReached) {
@@ -231,12 +249,11 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
             // If the sale is a fair launch, calculate the amount of tokens bought using
             //  the amount contributed and the total tokens available for the sale
             if (saleParams.price == 0) {
-                tokensBought =
-                    amountContributed[msg.sender][_saleId] * saleParams.tokenAmount / sale.totalPaymentTokenContributed;
+                tokensBought = contributed * saleParams.tokenAmount / sale.totalPaymentTokenContributed;
             } else {
                 // If the sale is a presale, calculate the amount of tokens bought using
                 // the amount contributed and the price
-                tokensBought = amountContributed[msg.sender][_saleId] * saleParams.price / 1e18;
+                contributed * saleParams.price / 1e18;
             }
             // Reset the amount contributed
             amountContributed[msg.sender][_saleId] = 0;
@@ -263,16 +280,19 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
                 // If the sale is not a vested sale, send the tokens to the user
                 saleParams.token.transfer(msg.sender, tokensBought);
             }
+
+            emit TokensClaimed(msg.sender, _saleId, tokensBought);
         } else {
             // If the soft cap is not reached, refund the user their contribution
-            uint256 paymentTokenContributed = amountContributed[msg.sender][_saleId];
             amountContributed[msg.sender][_saleId] = 0;
             if (address(saleParams.paymentToken) != address(0)) {
-                saleParams.paymentToken.transfer(msg.sender, paymentTokenContributed);
+                saleParams.paymentToken.transfer(msg.sender, contributed);
             } else {
-                (bool sc,) = payable(msg.sender).call{value: paymentTokenContributed}("");
+                (bool sc,) = payable(msg.sender).call{value: contributed}("");
                 require(sc, "Transfer failed");
             }
+
+            emit TokensRefunded(msg.sender, _saleId, contributed);
         }
     }
 
@@ -395,6 +415,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
             // Transfer the tokens to the owner or burn them(if refundType is false)
             saleParams.token.transfer(saleParams.owner, refundAmount);
         }
+
+        emit SaleEnded(_saleId, sale.softCapReached);
     }
 
     /**
@@ -403,6 +425,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
      */
     function enableSale(uint256 _saleId) external onlyRole(ADMIN_ROLE) {
         sales[_saleId].saleEnabled = true;
+
+        emit SaleEnabled(_saleId);
     }
 
     /**

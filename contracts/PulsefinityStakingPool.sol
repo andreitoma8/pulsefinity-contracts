@@ -76,6 +76,14 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
      */
     mapping(address => Stake[]) public stakes;
 
+    event Staked(address indexed user, uint256 amount, uint256 shares, uint256 startTimestamp, LockType lockType);
+
+    event Withdrawn(address indexed user, uint256 amount, uint256 shares, uint256 startTimestamp, LockType lockType);
+
+    event RewardAdded(uint256 reward);
+
+    event EarlyWithdrawalFeePaid(uint256 amount);
+
     /**
      * @notice Constructor function to initialize the interfaces
      * @param _pulsefinityToken The address of the pulsefinity token
@@ -131,6 +139,8 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
 
         // Add the stake to the user's stakes
         stakes[msg.sender].push(Stake(_amount, shares, block.timestamp, _lockType));
+
+        emit Staked(msg.sender, _amount, shares, block.timestamp, _lockType);
     }
 
     /**
@@ -171,6 +181,9 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
                 uint256 earlyWithdrawalFee = _stake.amount * 10 / 100;
                 pulsefinityToken.transfer(msg.sender, _stake.amount - earlyWithdrawalFee);
                 pulsefinityToken.transfer(owner(), earlyWithdrawalFee);
+                emit EarlyWithdrawalFeePaid(earlyWithdrawalFee);
+            } else {
+                pulsefinityToken.transfer(msg.sender, _stake.amount);
             }
         }
 
@@ -181,6 +194,8 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
         // Remove the stake from the user's stakes
         stakes[msg.sender][stakeIndex] = stakes[msg.sender][stakes[msg.sender].length - 1];
         stakes[msg.sender].pop();
+
+        emit Withdrawn(msg.sender, _stake.amount, rewardShares, _stake.startTimestamp, _stake.lockType);
     }
 
     // View functions
@@ -230,8 +245,12 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
             totalRewards += _amount;
 
             rewardToken.transferFrom(msg.sender, address(this), _amount);
+
+            emit RewardAdded(_amount);
         } else {
             totalRewards += msg.value;
+
+            emit RewardAdded(msg.value);
         }
     }
 
