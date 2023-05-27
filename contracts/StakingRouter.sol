@@ -28,8 +28,9 @@ contract StakingRouter is IStakingRouter, Ownable {
      * @notice The constructor for the StakingRouter contract
      * @param _pulsefinityToken The address of the Pulsefinity token
      */
-    constructor(IERC20 _pulsefinityToken) {
+    constructor(IERC20 _pulsefinityToken, TierLimits memory _tierLimits) {
         pulsefinityToken = _pulsefinityToken;
+        tierLimits = _tierLimits;
     }
 
     /**

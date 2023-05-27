@@ -20,10 +20,6 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
     bool public isNativeToken;
 
     /**
-     * @notice The total shares of the reward pool
-     */
-    uint256 public totalShares;
-    /**
      * @notice The total amount of rewards token in the reward pool
      */
     uint256 public totalRewards;
@@ -31,6 +27,16 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
      * @notice The total amount of tokens staked
      */
     uint256 public totalStaked;
+
+    /**
+     * @notice The total amount of shares
+     */
+    uint256 public totalShares;
+
+    /**
+     * @notice The index of the last reward added
+     */
+    uint256 public rewardIndex;
 
     /**
      * @notice The tier required to stake in this pool
@@ -60,7 +66,11 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
         /**
          * @notice The amount of shares the stake has from the reward pool
          */
-        uint256 rewardShares;
+        uint256 shares;
+        /**
+         * @notice The index of the stake in the stakes array
+         */
+        uint256 rewardIndex;
         /**
          * @notice The timestamp of when the stake was created
          */
@@ -76,9 +86,9 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
      */
     mapping(address => Stake[]) public stakes;
 
-    event Staked(address indexed user, uint256 amount, uint256 shares, uint256 startTimestamp, LockType lockType);
+    event Staked(address indexed user, uint256 amount, LockType lockType);
 
-    event Withdrawn(address indexed user, uint256 amount, uint256 shares, uint256 startTimestamp, LockType lockType);
+    event Withdrawn(address indexed user, uint256 amount, uint256 rewards);
 
     event RewardAdded(uint256 reward);
 
@@ -110,37 +120,26 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
      * @dev The tokens must be approved before calling this function
      */
     function stake(uint256 _amount, LockType _lockType) external {
-        Tier predictedTier = stakingRouter.getPredictedTier(msg.sender, _amount, true);
-        require(predictedTier >= requiredTier, "Insufficient tier");
-
         require(_amount > 0, "Cannot stake 0");
-        require(_lockType >= LockType(0) && _lockType <= LockType(5), "Invalid lock type");
+
+        Tier predictedTier = stakingRouter.getPredictedTier(msg.sender, _amount, true);
+        require(predictedTier >= requiredTier, "Invalid tier");
 
         pulsefinityToken.transferFrom(msg.sender, address(this), _amount);
 
         // Check if the tier of the user changes on this stake and update the stakersPerTier
         _checkTierChange(msg.sender, predictedTier);
 
-        // Calculate the reward shares of the stake
-        uint256 rewardBalance = isNativeToken ? address(this).balance : totalRewards;
+        uint256 shares = _multiplyByLock(_amount, _lockType);
 
-        uint256 shares;
-
-        if (totalShares == 0 || rewardBalance == 0) {
-            shares = _multiplyByLock(_amount, _lockType);
-        } else {
-            uint256 what = _amount * totalShares / rewardBalance;
-            shares += _multiplyByLock(what, _lockType);
-        }
-
-        // Update the total shares and total staked
-        totalShares += shares;
+        // Update the total staked and total shares
         totalStaked += _amount;
+        totalShares += shares;
 
         // Add the stake to the user's stakes
-        stakes[msg.sender].push(Stake(_amount, shares, block.timestamp, _lockType));
+        stakes[msg.sender].push(Stake(_amount, shares, rewardIndex, block.timestamp, _lockType));
 
-        emit Staked(msg.sender, _amount, shares, block.timestamp, _lockType);
+        emit Staked(msg.sender, _amount, _lockType);
     }
 
     /**
@@ -158,22 +157,20 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
 
         // Calculate the unlock timestamp of the stake
         uint256 unlockTimestamp = _getUnlockTimestamp(_stake.startTimestamp, _stake.lockType);
-
-        uint256 rewardShares = _stake.rewardShares;
+        uint256 rewardToTransfer;
 
         // If the stake is unlocked, transfer the reward and original amount to the user
         if (block.timestamp >= unlockTimestamp) {
             pulsefinityToken.transfer(msg.sender, _stake.amount);
 
+            rewardToTransfer = _calculateRewards(_stake);
             if (isNativeToken) {
-                uint256 rewardToTransfer = address(this).balance * rewardShares / totalShares;
                 (bool sc,) = payable(msg.sender).call{value: rewardToTransfer}("");
                 require(sc, "Transfer failed");
             } else {
-                uint256 rewardsToTransfer = totalRewards * rewardShares / totalShares;
-
-                rewardToken.transfer(msg.sender, rewardsToTransfer);
+                rewardToken.transfer(msg.sender, rewardToTransfer);
             }
+            totalRewards -= rewardToTransfer;
         } else {
             // If the stake is locked, transfer the original amount to the user and the early withdrawal fee to the owner
             // while leaving the reward in the pool
@@ -187,15 +184,15 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
             }
         }
 
-        // Update the total shares and total staked
-        totalShares -= rewardShares;
+        // Update  total staked and total shares
         totalStaked -= _stake.amount;
+        totalShares -= _stake.shares;
 
         // Remove the stake from the user's stakes
         stakes[msg.sender][stakeIndex] = stakes[msg.sender][stakes[msg.sender].length - 1];
         stakes[msg.sender].pop();
 
-        emit Withdrawn(msg.sender, _stake.amount, rewardShares, _stake.startTimestamp, _stake.lockType);
+        emit Withdrawn(msg.sender, _stake.amount, rewardToTransfer);
     }
 
     // View functions
@@ -239,7 +236,9 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
      * @param _amount The amount of tokens to add
      */
     function addRewards(uint256 _amount) external payable {
+        require(totalShares > 0, "Cannot add rewards when there are no stakes");
         if (!isNativeToken) {
+            require(_amount > 0, "Cannot add 0 rewards");
             require(msg.value == 0, "Cannot add rewards with ETH");
 
             totalRewards += _amount;
@@ -248,43 +247,50 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
 
             emit RewardAdded(_amount);
         } else {
+            require(msg.value > 0, "Cannot add 0 rewards");
             totalRewards += msg.value;
 
             emit RewardAdded(msg.value);
         }
+        rewardIndex += (isNativeToken ? msg.value : _amount) * 1e18 / totalShares;
     }
 
     /**
      * @notice Withdraw rewards surplus
      */
     function withdrawRewardSurplus() external onlyOwner {
-        require(!isNativeToken, "Cannot withdraw rewards surplus with ETH");
+        require(!isNativeToken, "Cannot withdraw rewards surplus with native token");
         uint256 rewardsSurplus = rewardToken.balanceOf(address(this)) - totalRewards;
         if (address(pulsefinityToken) == address(rewardToken)) {
             rewardsSurplus -= totalStaked;
         }
+        require(rewardsSurplus > 0, "No rewards surplus to withdraw");
         rewardToken.transfer(msg.sender, rewardsSurplus);
     }
 
     // Internal functions
 
+    function _calculateRewards(Stake memory _stake) private view returns (uint256) {
+        return _stake.shares * (rewardIndex - _stake.rewardIndex) / 1e18;
+    }
+
     function _checkTierChange(address _user, Tier _predictedTier) internal {
         Tier currentTier = stakingRouter.getTier(_user);
 
         if (currentTier != _predictedTier) {
-            stakingRouter.updateStakersPerTier(currentTier, false);
-            stakingRouter.updateStakersPerTier(_predictedTier, true);
+            if (currentTier != Tier(0)) stakingRouter.updateStakersPerTier(currentTier, false);
+            if (_predictedTier != Tier(0)) stakingRouter.updateStakersPerTier(_predictedTier, true);
         }
     }
 
     function _multiplyByLock(uint256 _amount, LockType _lockType) internal pure returns (uint256 newAmount) {
         newAmount = _amount;
-        if (_lockType == LockType(0)) newAmount += _amount * 2 / 100;
-        else if (_lockType == LockType(1)) newAmount += _amount * 5 / 100;
-        else if (_lockType == LockType(2)) newAmount += _amount * 12 / 100;
-        else if (_lockType == LockType(3)) newAmount += _amount * 18 / 100;
-        else if (_lockType == LockType(4)) newAmount += _amount * 40 / 100;
-        else newAmount += _amount * 100 / 100;
+        if (_lockType == LockType(0)) newAmount += _amount * 200 / 10000;
+        else if (_lockType == LockType(1)) newAmount += _amount * 500 / 10000;
+        else if (_lockType == LockType(2)) newAmount += _amount * 1200 / 10000;
+        else if (_lockType == LockType(3)) newAmount += _amount * 1800 / 10000;
+        else if (_lockType == LockType(4)) newAmount += _amount * 4000 / 10000;
+        else newAmount += _amount;
     }
 
     function _getUnlockTimestamp(uint256 _stakeStart, LockType _lockType)

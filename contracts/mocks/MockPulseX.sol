@@ -57,7 +57,7 @@ contract MockPulseX {
     }
 
     function _createPair(address tokenA, address tokenB) internal {
-        address pair = address(new MockERC20());
+        address pair = address(new MockERC20("LP Token", "LP"));
         pairs[tokenA][tokenB] = pair;
         pairs[tokenB][tokenA] = pair;
     }
