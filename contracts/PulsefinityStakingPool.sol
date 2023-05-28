@@ -209,7 +209,7 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
      * @notice Get the total value locked in the pool for a user
      * @param _wallet The address of the user
      */
-    function getTotalValueLocked(address _wallet) external view override returns (uint256) {
+    function getTotalValueStaked(address _wallet) external view override returns (uint256) {
         if (stakes[_wallet].length == 0) return 0;
         Stake[] memory _stakes = stakes[_wallet];
 

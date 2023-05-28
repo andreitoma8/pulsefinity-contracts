@@ -8,7 +8,7 @@ interface IStakingPool {
      * @notice Get the total value locked in the pool for a user
      * @param _wallet The address of the user
      */
-    function getTotalValueLocked(address _wallet) external view returns (uint256);
+    function getTotalValueStaked(address _wallet) external view returns (uint256);
 
     /**
      * @notice Add rewards to the pool

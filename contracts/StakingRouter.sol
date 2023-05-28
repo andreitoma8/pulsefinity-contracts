@@ -8,7 +8,7 @@ import "./interfaces/IStakingPool.sol";
 
 contract StakingRouter is IStakingRouter, Ownable {
     IERC20 public pulsefinityToken;
-    IStakingPool[] public stakingPool;
+    IStakingPool[] public stakingPools;
 
     /**
      * @notice The limits for each tier
@@ -50,8 +50,8 @@ contract StakingRouter is IStakingRouter, Ownable {
      * @param _address The address to check
      */
     function getTotalStaked(address _address) public view returns (uint256 totalStaked) {
-        for (uint256 i = 0; i < stakingPool.length; i++) {
-            totalStaked += stakingPool[i].getTotalValueLocked(_address);
+        for (uint256 i = 0; i < stakingPools.length; i++) {
+            totalStaked += stakingPools[i].getTotalValueStaked(_address);
         }
     }
 
@@ -83,9 +83,9 @@ contract StakingRouter is IStakingRouter, Ownable {
     /**
      * @notice Returns the total amount staked across all staking pools
      */
-    function getTotalAmountStaked() external view returns (uint256 totalAmountStaked) {
-        for (uint256 i = 0; i < stakingPool.length; i++) {
-            totalAmountStaked += pulsefinityToken.balanceOf(address(stakingPool[i]));
+    function getGlobalAmountStaked() external view returns (uint256 totalAmountStaked) {
+        for (uint256 i = 0; i < stakingPools.length; i++) {
+            totalAmountStaked += pulsefinityToken.balanceOf(address(stakingPools[i]));
         }
     }
 
@@ -127,7 +127,8 @@ contract StakingRouter is IStakingRouter, Ownable {
      * @param _stakingPool The address of the staking pool to add
      */
     function addStakingPool(IStakingPool _stakingPool) external onlyOwner {
-        stakingPool.push(_stakingPool);
+        require(!isStakingPool[address(_stakingPool)], "Staking pool already added");
+        stakingPools.push(_stakingPool);
         isStakingPool[address(_stakingPool)] = true;
     }
 
@@ -136,10 +137,12 @@ contract StakingRouter is IStakingRouter, Ownable {
      * @param _index The index of the staking pool to remove
      */
     function removeStakingPool(uint256 _index) external onlyOwner {
-        require(_index < stakingPool.length, "Index out of bounds");
-        stakingPool[_index] = stakingPool[stakingPool.length - 1];
-        stakingPool.pop();
-        isStakingPool[address(stakingPool[_index])] = false;
+        require(_index < stakingPools.length, "Index out of bounds");
+        isStakingPool[address(stakingPools[_index])] = false;
+        if (_index != stakingPools.length - 1) {
+            stakingPools[_index] = stakingPools[stakingPools.length - 1];
+        }
+        stakingPools.pop();
     }
 
     /**

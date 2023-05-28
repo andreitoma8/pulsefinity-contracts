@@ -37,6 +37,15 @@ describe("Staking", () => {
     let bob: SignerWithAddress;
     let carol: SignerWithAddress;
 
+    const tierLimits = {
+        nano: ethers.utils.parseEther("10"),
+        micro: ethers.utils.parseEther("20"),
+        mega: ethers.utils.parseEther("30"),
+        giga: ethers.utils.parseEther("40"),
+        tera: ethers.utils.parseEther("50"),
+        teraPlus: ethers.utils.parseEther("60"),
+    };
+
     const increaseTime = async (seconds: number) => {
         await ethers.provider.send("evm_increaseTime", [seconds]);
         await ethers.provider.send("evm_mine", []);
@@ -52,14 +61,7 @@ describe("Staking", () => {
         rewardToken = await MockERC20Factory.deploy("Reward Token", "REWARD");
 
         const StakingRouterFactory = await ethers.getContractFactory("StakingRouter");
-        stakingRouter = await StakingRouterFactory.deploy(pulsefinity.address, {
-            nano: ethers.utils.parseEther("10"),
-            micro: ethers.utils.parseEther("20"),
-            mega: ethers.utils.parseEther("30"),
-            giga: ethers.utils.parseEther("40"),
-            tera: ethers.utils.parseEther("50"),
-            teraPlus: ethers.utils.parseEther("60"),
-        });
+        stakingRouter = await StakingRouterFactory.deploy(pulsefinity.address, tierLimits);
 
         const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
         stakingPool = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, rewardToken.address, stakingRouter.address, Tier.Nano);
@@ -244,9 +246,9 @@ describe("Staking", () => {
                 const stakedAmountBob = ethers.utils.parseEther("30");
                 await pulsefinity.mint(bob.address, stakedAmountBob);
                 await pulsefinity.connect(bob).approve(stakingPool.address, stakedAmountBob);
-                await stakingPool.connect(bob).stake(stakedAmountBob, LockType.Days15);
+                await stakingPool.connect(bob).stake(stakedAmountBob, LockType.Days30);
 
-                await increaseTime(60 * 60 * 24 * 15 + 1);
+                await increaseTime(60 * 60 * 24 * 30 + 1);
 
                 await rewardToken.mint(deployer.address, rewardsAmmount);
                 await rewardToken.approve(stakingPool.address, rewardsAmmount);
@@ -418,6 +420,228 @@ describe("Staking", () => {
                 await stakingPool.stake(tokenstToMint.sub(rewardsSurplus), LockType.Days15);
 
                 await expect(stakingPool.withdrawRewardSurplus()).to.changeTokenBalance(pulsefinity, deployer, rewardsSurplus);
+            });
+        });
+
+        describe("getTotalValueStaked", () => {
+            const stakedAmount = ethers.utils.parseEther("10");
+
+            it("should return 0 if user has no stakes", async () => {});
+
+            it("should correctly return the total value locked", async () => {
+                await pulsefinity.mint(alice.address, stakedAmount);
+                await pulsefinity.connect(alice).approve(stakingPool.address, stakedAmount);
+                await stakingPool.connect(alice).stake(stakedAmount, LockType.Days15);
+
+                await pulsefinity.mint(alice.address, stakedAmount);
+                await pulsefinity.connect(alice).approve(stakingPool.address, stakedAmount);
+                await stakingPool.connect(alice).stake(stakedAmount, LockType.Days30);
+
+                await pulsefinity.mint(bob.address, stakedAmount);
+                await pulsefinity.connect(bob).approve(stakingPool.address, stakedAmount);
+                await stakingPool.connect(bob).stake(stakedAmount, LockType.Days15);
+
+                expect(await stakingPool.getTotalValueStaked(alice.address)).to.equal(stakedAmount.mul(2));
+            });
+        });
+    });
+
+    describe("StakingRouter", () => {
+        let stakingPool2: PulsefinityStakingPool;
+        beforeEach(async () => {
+            const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
+            stakingPool2 = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Micro);
+            await stakingRouter.addStakingPool(stakingPool2.address);
+        });
+
+        describe("constructor", () => {
+            it("should correctly initialize the contract", async () => {
+                expect(await stakingRouter.owner()).to.equal(deployer.address);
+                expect(await stakingRouter.pulsefinityToken()).to.equal(pulsefinity.address);
+                expect(await stakingRouter.tierLimits()).to.deep.equal(Object.values(tierLimits));
+            });
+        });
+
+        describe("addStakingPool", () => {
+            it("should revert if staking pool is already added", async () => {
+                await expect(stakingRouter.addStakingPool(stakingPool.address)).to.be.revertedWith("Staking pool already added");
+            });
+
+            it("should correctly add staking pool", async () => {
+                expect(await stakingRouter.stakingPools(1)).to.equal(stakingPool2.address);
+                expect(await stakingRouter.isStakingPool(stakingPool2.address)).to.equal(true);
+            });
+        });
+
+        describe("removeStakingPool", () => {
+            it("should revert if index is out of bounds", async () => {
+                await expect(stakingRouter.removeStakingPool(2)).to.be.revertedWith("Index out of bounds");
+            });
+
+            it("should correctly remove staking pool", async () => {
+                await stakingRouter.removeStakingPool(1);
+                expect(await stakingRouter.isStakingPool(stakingPool2.address)).to.equal(false);
+            });
+        });
+
+        describe("setTiers", () => {
+            it("should correctly set tier limit", async () => {
+                const newTierLimits = {
+                    nano: ethers.utils.parseEther("100"),
+                    micro: ethers.utils.parseEther("200"),
+                    mega: ethers.utils.parseEther("300"),
+                    giga: ethers.utils.parseEther("400"),
+                    tera: ethers.utils.parseEther("500"),
+                    teraPlus: ethers.utils.parseEther("600"),
+                };
+
+                await stakingRouter.setTiers(newTierLimits);
+                expect(await stakingRouter.tierLimits()).to.deep.equal(Object.values(newTierLimits));
+            });
+        });
+
+        describe("updateStakersPerTier", () => {
+            it("should revert if caller is not staking pool", async () => {
+                await expect(stakingRouter.updateStakersPerTier(Tier.Nano, true)).to.be.revertedWith("Caller is not a staking pool");
+                await expect(stakingRouter.updateStakersPerTier(Tier.Nano, false)).to.be.revertedWith("Caller is not a staking pool");
+            });
+
+            it("should correctly update stakers per tier", async () => {
+                await stakingRouter.addStakingPool(deployer.address);
+
+                const nanoStakersBefore = await stakingRouter.stakersPerTier(Tier.Nano);
+                await stakingRouter.updateStakersPerTier(Tier.Nano, true);
+                expect(await stakingRouter.stakersPerTier(Tier.Nano)).to.equal(nanoStakersBefore.add(1));
+
+                await stakingRouter.updateStakersPerTier(Tier.Nano, false);
+                expect(await stakingRouter.stakersPerTier(Tier.Nano)).to.equal(nanoStakersBefore);
+            });
+        });
+
+        describe("getTotalStaked", () => {
+            it("should correctly return the total staked", async () => {
+                const stakedAmountPool1 = ethers.utils.parseEther("10");
+                const stakedAmountPool2 = ethers.utils.parseEther("20");
+
+                await pulsefinity.mint(alice.address, stakedAmountPool1);
+                await pulsefinity.connect(alice).approve(stakingPool.address, stakedAmountPool1);
+                await stakingPool.connect(alice).stake(stakedAmountPool1, LockType.Days15);
+
+                await pulsefinity.mint(alice.address, stakedAmountPool2);
+                await pulsefinity.connect(alice).approve(stakingPool2.address, stakedAmountPool2);
+                await stakingPool2.connect(alice).stake(stakedAmountPool2, LockType.Days15);
+
+                expect(await stakingRouter.getTotalStaked(alice.address)).to.equal(stakedAmountPool1.add(stakedAmountPool2));
+            });
+        });
+
+        describe("getTier", () => {
+            it("should correctly return the tier", async () => {
+                const teraPlusLimit = tierLimits.teraPlus;
+
+                await pulsefinity.mint(alice.address, teraPlusLimit);
+                await pulsefinity.connect(alice).approve(stakingPool.address, teraPlusLimit);
+
+                await stakingPool.connect(alice).stake(tierLimits.nano, LockType.Days15);
+                expect(await stakingRouter.getTier(alice.address)).to.equal(Tier.Nano);
+
+                await stakingPool.connect(alice).stake(tierLimits.micro.sub(tierLimits.nano), LockType.Days15);
+                expect(await stakingRouter.getTier(alice.address)).to.equal(Tier.Micro);
+
+                await stakingPool.connect(alice).stake(tierLimits.mega.sub(tierLimits.micro), LockType.Days15);
+                expect(await stakingRouter.getTier(alice.address)).to.equal(Tier.Mega);
+
+                await stakingPool.connect(alice).stake(tierLimits.giga.sub(tierLimits.mega), LockType.Days15);
+                expect(await stakingRouter.getTier(alice.address)).to.equal(Tier.Giga);
+
+                await stakingPool.connect(alice).stake(tierLimits.tera.sub(tierLimits.giga), LockType.Days15);
+                expect(await stakingRouter.getTier(alice.address)).to.equal(Tier.Tera);
+
+                await stakingPool.connect(alice).stake(tierLimits.teraPlus.sub(tierLimits.tera), LockType.Days15);
+                expect(await stakingRouter.getTier(alice.address)).to.equal(Tier.TeraPlus);
+            });
+        });
+
+        describe("getPredictedTier", () => {
+            it("should correctly return the predicted tier", async () => {
+                const teraPlusLimit = tierLimits.teraPlus;
+
+                await pulsefinity.mint(alice.address, teraPlusLimit);
+                await pulsefinity.connect(alice).approve(stakingPool.address, teraPlusLimit);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.nano, true)).to.equal(Tier.Nano);
+                await stakingPool.connect(alice).stake(tierLimits.nano, LockType.Days15);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.micro.sub(tierLimits.nano), true)).to.equal(Tier.Micro);
+                await stakingPool.connect(alice).stake(tierLimits.micro.sub(tierLimits.nano), LockType.Days15);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.mega.sub(tierLimits.micro), true)).to.equal(Tier.Mega);
+                await stakingPool.connect(alice).stake(tierLimits.mega.sub(tierLimits.micro), LockType.Days15);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.giga.sub(tierLimits.mega), true)).to.equal(Tier.Giga);
+                await stakingPool.connect(alice).stake(tierLimits.giga.sub(tierLimits.mega), LockType.Days15);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.tera.sub(tierLimits.giga), true)).to.equal(Tier.Tera);
+                await stakingPool.connect(alice).stake(tierLimits.tera.sub(tierLimits.giga), LockType.Days15);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.teraPlus.sub(tierLimits.tera), true)).to.equal(Tier.TeraPlus);
+                await stakingPool.connect(alice).stake(tierLimits.teraPlus.sub(tierLimits.tera), LockType.Days15);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.teraPlus.sub(tierLimits.tera), false)).to.equal(Tier.Tera);
+                await stakingPool.connect(alice).withdraw(5);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.tera.sub(tierLimits.giga), false)).to.equal(Tier.Giga);
+                await stakingPool.connect(alice).withdraw(4);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.giga.sub(tierLimits.mega), false)).to.equal(Tier.Mega);
+                await stakingPool.connect(alice).withdraw(3);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.mega.sub(tierLimits.micro), false)).to.equal(Tier.Micro);
+                await stakingPool.connect(alice).withdraw(2);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.micro.sub(tierLimits.nano), false)).to.equal(Tier.Nano);
+                await stakingPool.connect(alice).withdraw(1);
+
+                expect(await stakingRouter.getPredictedTier(alice.address, tierLimits.nano, false)).to.equal(Tier.Null);
+            });
+        });
+
+        describe("getStakersPerTier", () => {
+            it("should correctly return the stakers per tier", async () => {
+                await pulsefinity.mint(alice.address, tierLimits.nano);
+                await pulsefinity.connect(alice).approve(stakingPool.address, tierLimits.nano);
+                await stakingPool.connect(alice).stake(tierLimits.nano, LockType.Days15);
+
+                await pulsefinity.mint(bob.address, tierLimits.giga);
+                await pulsefinity.connect(bob).approve(stakingPool.address, tierLimits.giga);
+                await stakingPool.connect(bob).stake(tierLimits.giga, LockType.Days15);
+
+                await pulsefinity.mint(carol.address, tierLimits.tera);
+                await pulsefinity.connect(carol).approve(stakingPool.address, tierLimits.tera);
+                await stakingPool.connect(carol).stake(tierLimits.tera, LockType.Days15);
+
+                const stakersPerTierArray = await stakingRouter.getStakersPerTier();
+                const stakersPerTierNumberArray = stakersPerTierArray.map((value) => value.toNumber());
+
+                expect(stakersPerTierNumberArray).to.deep.equal([1, 0, 0, 1, 1, 0]);
+            });
+        });
+
+        describe("getGlobalAmountStaked", () => {
+            it("should correctly return the global amount staked", async () => {
+                await pulsefinity.mint(alice.address, tierLimits.nano);
+                await pulsefinity.connect(alice).approve(stakingPool.address, tierLimits.nano);
+                await stakingPool.connect(alice).stake(tierLimits.nano, LockType.Days15);
+
+                await pulsefinity.mint(bob.address, tierLimits.giga);
+                await pulsefinity.connect(bob).approve(stakingPool.address, tierLimits.giga);
+                await stakingPool.connect(bob).stake(tierLimits.giga, LockType.Days15);
+
+                await pulsefinity.mint(carol.address, tierLimits.tera);
+                await pulsefinity.connect(carol).approve(stakingPool.address, tierLimits.tera);
+                await stakingPool.connect(carol).stake(tierLimits.tera, LockType.Days15);
+
+                expect(await stakingRouter.getGlobalAmountStaked()).to.equal(tierLimits.nano.add(tierLimits.giga).add(tierLimits.tera));
             });
         });
     });
