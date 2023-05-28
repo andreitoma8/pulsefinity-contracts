@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IStakingRouter.sol";
 import "./interfaces/IStakingPool.sol";
 
-contract StakingRouter is IStakingRouter, Ownable {
+contract StakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
     IERC20 public pulsefinityToken;
     IStakingPool[] public stakingPools;
 
@@ -25,12 +26,21 @@ contract StakingRouter is IStakingRouter, Ownable {
     TierLimits public tierLimits;
 
     /**
-     * @notice The constructor for the StakingRouter contract
-     * @param _pulsefinityToken The address of the Pulsefinity token
+     * @custom:oz-upgrades-unsafe-allow constructor
      */
-    constructor(IERC20 _pulsefinityToken, TierLimits memory _tierLimits) {
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Function to be called once on deployment
+     * @param _pulsefinityToken The address of the Pulsefinity token
+     * @param _tierLimits The tier limits for each tier
+     */
+    function initialize(IERC20 _pulsefinityToken, TierLimits memory _tierLimits) external initializer {
         pulsefinityToken = _pulsefinityToken;
         tierLimits = _tierLimits;
+        __Ownable_init();
     }
 
     /**
@@ -172,4 +182,10 @@ contract StakingRouter is IStakingRouter, Ownable {
             return Tier.TeraPlus;
         }
     }
+
+    /**
+     * @notice This function is used to upgrade the contract
+     * @param newImplementation The address of the new implementation
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }

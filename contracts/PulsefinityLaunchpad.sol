@@ -4,27 +4,18 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IPulseXRouter01.sol";
 import "./interfaces/IPulseXFactory.sol";
 import "./interfaces/IVestingContract.sol";
 import "./interfaces/IStakingRouter.sol";
 
 /**
- * TODO:
- * - add checks for buyer tier and contribution limits
- * - add support for ERC20 tokens as payment - done
- * - unit tests for all contracts -
- * - integration tests -
- * - code refactor -
- * - gas optimizations -
- */
-
-/**
  * @title PulsefinityLaunchpad
  * @author andreitoma8
  * @notice Launchpad contract for Pulsefinity presales and fair launches
  */
-contract PulsefinityLaunchpad is AccessControlUpgradeable {
+contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     using CountersUpgradeable for CountersUpgradeable.Counter;
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -187,7 +178,6 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         require(block.timestamp <= saleParams.endTimestamp, "Sale has ended");
         require(sale.totalPaymentTokenContributed < saleParams.hardCap, "Sale has ended");
 
-        // TODO: add checks for buyer tier and contribution limits
         Tier buyerTier = stakingRouter.getTier(msg.sender);
         if (saleParams.price == 0) {
             require(buyerTier > Tier.Null, "Buyer tier is too low");
@@ -487,4 +477,10 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable {
         require(_saleParams.startTimestamp > block.timestamp, "Start timestamp must be in the future");
         require(_saleParams.endTimestamp > _saleParams.startTimestamp, "End timestamp must be after start timestamp");
     }
+
+    /**
+     * @notice This function is used to upgrade the contract
+     * @param newImplementation The address of the new implementation
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 }

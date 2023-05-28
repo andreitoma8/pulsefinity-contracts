@@ -2,6 +2,7 @@ import type { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai, { expect } from "chai";
 import chaiAsPromised from "chai-as-promised";
 import { ethers } from "hardhat";
+import { upgrades } from "hardhat";
 
 import { PulsefinityStakingPool, StakingRouter, MockERC20 } from "../typechain-types";
 
@@ -61,16 +62,18 @@ describe("Staking", () => {
         rewardToken = await MockERC20Factory.deploy("Reward Token", "REWARD");
 
         const StakingRouterFactory = await ethers.getContractFactory("StakingRouter");
-        stakingRouter = await StakingRouterFactory.deploy(pulsefinity.address, tierLimits);
+        stakingRouter = (await upgrades.deployProxy(StakingRouterFactory, [pulsefinity.address, tierLimits], { kind: "uups" })) as StakingRouter;
 
         const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-        stakingPool = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, rewardToken.address, stakingRouter.address, Tier.Nano);
+        stakingPool = (await upgrades.deployProxy(PulsefinityStakingPoolFactory, [pulsefinity.address, rewardToken.address, stakingRouter.address, Tier.Nano], {
+            kind: "uups",
+        })) as PulsefinityStakingPool;
 
         await stakingRouter.addStakingPool(stakingPool.address);
     });
 
     describe("PulsefinityStakingPool", () => {
-        describe("constructor", () => {
+        describe("initializer", () => {
             it("should correctly initialize staking for ERC20 reward token", async () => {
                 expect(await stakingPool.pulsefinityToken()).to.equal(pulsefinity.address);
                 expect(await stakingPool.rewardToken()).to.equal(rewardToken.address);
@@ -82,7 +85,11 @@ describe("Staking", () => {
 
             it("should correctly initialize staking for native reward token", async () => {
                 const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-                stakingPool = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano);
+                stakingPool = (await upgrades.deployProxy(
+                    PulsefinityStakingPoolFactory,
+                    [pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano],
+                    { kind: "uups" }
+                )) as PulsefinityStakingPool;
                 expect(await stakingPool.isNativeToken()).to.equal(true);
                 expect(await stakingPool.getRewardToken()).to.equal(ethers.constants.AddressZero);
             });
@@ -291,7 +298,11 @@ describe("Staking", () => {
 
             it("should correctly withdraw after the lock period for native token reward", async () => {
                 const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-                stakingPool = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano);
+                stakingPool = (await upgrades.deployProxy(
+                    PulsefinityStakingPoolFactory,
+                    [pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano],
+                    { kind: "uups" }
+                )) as PulsefinityStakingPool;
                 await stakingRouter.addStakingPool(stakingPool.address);
 
                 const stakedAmountAlice2 = ethers.utils.parseEther("10");
@@ -355,12 +366,11 @@ describe("Staking", () => {
             describe("ETH rewards", () => {
                 beforeEach(async () => {
                     const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-                    stakingPool = await PulsefinityStakingPoolFactory.deploy(
-                        pulsefinity.address,
-                        ethers.constants.AddressZero,
-                        stakingRouter.address,
-                        Tier.Nano
-                    );
+                    stakingPool = (await upgrades.deployProxy(
+                        PulsefinityStakingPoolFactory,
+                        [pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano],
+                        { kind: "uups" }
+                    )) as PulsefinityStakingPool;
                     await stakingRouter.addStakingPool(stakingPool.address);
 
                     const stakedAmountAlice = ethers.utils.parseEther("10");
@@ -387,7 +397,11 @@ describe("Staking", () => {
 
             it("should revert if rewards token is native token", async () => {
                 const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-                stakingPool = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano);
+                stakingPool = (await upgrades.deployProxy(
+                    PulsefinityStakingPoolFactory,
+                    [pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano],
+                    { kind: "uups" }
+                )) as PulsefinityStakingPool;
                 await stakingRouter.addStakingPool(stakingPool.address);
 
                 await expect(stakingPool.withdrawRewardSurplus()).to.be.revertedWith("Cannot withdraw rewards surplus with native token");
@@ -409,7 +423,11 @@ describe("Staking", () => {
 
             it("should correctly withdraw rewards surplus if staked and rewards token are the same", async () => {
                 const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-                stakingPool = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, pulsefinity.address, stakingRouter.address, Tier.Nano);
+                stakingPool = (await upgrades.deployProxy(
+                    PulsefinityStakingPoolFactory,
+                    [pulsefinity.address, pulsefinity.address, stakingRouter.address, Tier.Nano],
+                    { kind: "uups" }
+                )) as PulsefinityStakingPool;
                 await stakingRouter.addStakingPool(stakingPool.address);
 
                 const tokenstToMint = ethers.utils.parseEther("100");
@@ -450,11 +468,15 @@ describe("Staking", () => {
         let stakingPool2: PulsefinityStakingPool;
         beforeEach(async () => {
             const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
-            stakingPool2 = await PulsefinityStakingPoolFactory.deploy(pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Micro);
+            stakingPool2 = (await upgrades.deployProxy(
+                PulsefinityStakingPoolFactory,
+                [pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano],
+                { kind: "uups" }
+            )) as PulsefinityStakingPool;
             await stakingRouter.addStakingPool(stakingPool2.address);
         });
 
-        describe("constructor", () => {
+        describe("initializer", () => {
             it("should correctly initialize the contract", async () => {
                 expect(await stakingRouter.owner()).to.equal(deployer.address);
                 expect(await stakingRouter.pulsefinityToken()).to.equal(pulsefinity.address);

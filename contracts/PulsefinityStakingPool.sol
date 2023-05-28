@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IStakingPool.sol";
 import "./interfaces/IStakingRouter.sol";
 import {Tier} from "./interfaces/IStakingRouter.sol";
 
-contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
+contract PulsefinityStakingPool is IStakingPool, OwnableUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable {
     IStakingRouter public stakingRouter;
 
     IERC20 public pulsefinityToken;
@@ -95,13 +96,26 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
     event EarlyWithdrawalFeePaid(uint256 amount);
 
     /**
-     * @notice Constructor function to initialize the interfaces
+     * @custom:oz-upgrades-unsafe-allow constructor
+     */
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Function to be called once on deployment
      * @param _pulsefinityToken The address of the pulsefinity token
      * @param _rewardToken The address of the reward token
      * @param _stakingRouter The address of the staking router
      * @param _requiredTier The tier required to stake in this pool
      */
-    constructor(address _pulsefinityToken, address _rewardToken, IStakingRouter _stakingRouter, Tier _requiredTier) {
+    function initialize(
+        address _pulsefinityToken,
+        address _rewardToken,
+        IStakingRouter _stakingRouter,
+        Tier _requiredTier
+    ) external initializer {
+        __Ownable_init();
         pulsefinityToken = IERC20(_pulsefinityToken);
         stakingRouter = _stakingRouter;
 
@@ -305,4 +319,10 @@ contract PulsefinityStakingPool is IStakingPool, Ownable, ReentrancyGuard {
         else if (_lockType == LockType(4)) unlockTimestamp = _stakeStart + 180 days;
         else unlockTimestamp = _stakeStart + 360 days;
     }
+
+    /**
+     * @notice This function is used to upgrade the contract
+     * @param newImplementation The address of the new implementation
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
