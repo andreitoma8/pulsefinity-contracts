@@ -39,6 +39,7 @@ contract VestingContract is IVestingContract {
      * @param _token The token to be vested
      * @param _beneficiary The address of the beneficiary
      * @param _start The start UNIX timestamp of the vesting period
+     * (if the start time is in the past, the vesting period will start immediately)
      * @param _duration The duration of the vesting period in DurationUnits
      * @param _durationUnits The units of the duration(0 = days, 1 = weeks, 2 = months)
      * @param _amountTotal The total amount of tokens to be vested
@@ -55,7 +56,9 @@ contract VestingContract is IVestingContract {
         // perform input checks
         require(_beneficiary != address(0), "VestingContract: beneficiary is the zero address");
         require(_amountTotal > 0, "VestingContract: amount is 0");
-        require(_start >= block.timestamp, "VestingContract: start is before current time");
+        if (_start < block.timestamp) {
+            _start = block.timestamp;
+        }
 
         // transfer the tokens to be locked to the contract
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amountTotal);

@@ -26,6 +26,16 @@ contract StakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
     TierLimits public tierLimits;
 
     /**
+     * @notice Mapping of tier to the number of stakers in that tier
+     */
+    mapping(Tier => uint256) public stakersPerTier;
+
+    /**
+     * @notice Mapping of address to staking pool status
+     */
+    mapping(address => bool) public isStakingPool;
+
+    /**
      * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor() {
@@ -42,16 +52,6 @@ contract StakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
         tierLimits = _tierLimits;
         __Ownable_init();
     }
-
-    /**
-     * @notice Mapping of tier to the number of stakers in that tier
-     */
-    mapping(Tier => uint256) public stakersPerTier;
-
-    /**
-     * @notice Mapping of address to staking pool status
-     */
-    mapping(address => bool) public isStakingPool;
 
     // view functions
 
@@ -112,6 +112,14 @@ contract StakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
         _stakersPerTier[uint256(Tier.Tera) - 1] = stakersPerTier[Tier.Tera];
         _stakersPerTier[uint256(Tier.TeraPlus) - 1] = stakersPerTier[Tier.TeraPlus];
         return _stakersPerTier;
+    }
+
+    /**
+     * @notice Returns the total stakers in a tier
+     * @param _tier The tier to query
+     */
+    function getStakersForTier(Tier _tier) external view override returns (uint256) {
+        return stakersPerTier[_tier];
     }
 
     // external functions

@@ -10,6 +10,8 @@ import "./interfaces/IPulseXFactory.sol";
 import "./interfaces/IVestingContract.sol";
 import "./interfaces/IStakingRouter.sol";
 
+import "hardhat/console.sol";
+
 /**
  * @title PulsefinityLaunchpad
  * @author andreitoma8
@@ -22,8 +24,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     uint256 public constant WINNER_FEE = 2000; // 20% in BPS
 
     IStakingRouter public stakingRouter;
-    IPulseXRouter01 public pulseRouter;
-    IPulseXFactory public pulseFactory;
+    IPulseXRouter01 public pulseXRouter;
+    IPulseXFactory public pulseXFactory;
     IVestingContract public vestingContract;
 
     struct SaleParams {
@@ -60,7 +62,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     uint256 public minimumLiquidityPercentage; // BPS
     uint256 public feePool; // total fees collected
 
-    CountersUpgradeable.Counter private _saleIdTracker;
+    CountersUpgradeable.Counter public saleIdTracker;
 
     /**
      * @notice Mapping of Tier to weight
@@ -75,7 +77,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     /**
      * @notice Mapping of supported payment tokens(address(0) = PLS)
      */
-    mapping(address => bool) public supportedPaymentTokens;
+    mapping(address => bool) public isPaymentTokenSupported;
 
     /**
      * @notice Mapping of buyer address to sale ID to amount contributed
@@ -99,6 +101,9 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
     event TokensRefunded(address indexed buyer, uint256 indexed saleId, uint256 amount);
 
+    /**
+     * @custom:oz-upgrades-unsafe-allow constructor
+     */
     constructor() {
         _disableInitializers();
     }
@@ -108,18 +113,31 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _pulseXRouter The PulseXRouter contract
      * @param _pulseXFactory The PulseXFactory contract
      */
-    function initialize(IStakingRouter _stakingRouter, IPulseXRouter01 _pulseXRouter, IPulseXFactory _pulseXFactory)
-        external
-        initializer
-    {
+    function initialize(
+        IStakingRouter _stakingRouter,
+        IPulseXRouter01 _pulseXRouter,
+        IPulseXFactory _pulseXFactory,
+        IVestingContract _vestingContract
+    ) external initializer {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(ADMIN_ROLE, msg.sender);
 
         stakingRouter = _stakingRouter;
-        pulseRouter = _pulseXRouter;
-        pulseFactory = _pulseXFactory;
+        pulseXRouter = _pulseXRouter;
+        pulseXFactory = _pulseXFactory;
+        vestingContract = _vestingContract;
 
-        supportedPaymentTokens[address(0)] = true;
+        isPaymentTokenSupported[address(0)] = true;
+
+        minimumLiqudityLockupTime = 60;
+        minimumLiquidityPercentage = 5000;
+
+        tierWeights[Tier.Nano] = 1;
+        tierWeights[Tier.Micro] = 2;
+        tierWeights[Tier.Mega] = 4;
+        tierWeights[Tier.Giga] = 8;
+        tierWeights[Tier.Tera] = 16;
+        tierWeights[Tier.TeraPlus] = 16;
     }
 
     /**
@@ -132,8 +150,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         _checkSaleParams(_saleParams);
 
         // Create the sale ID
-        _saleIdTracker.increment();
-        uint256 saleId = _saleIdTracker.current();
+        saleIdTracker.increment();
+        uint256 saleId = saleIdTracker.current();
 
         // Create the sale
         sales[saleId].saleParams = _saleParams;
@@ -143,13 +161,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         uint256 tokensForLiquidity;
         if (_saleParams.price == 0) {
             totalTokensForSale = _saleParams.tokenAmount;
-            sales[saleId].saleParams.hardCap = type(uint256).max;
             tokensForLiquidity = (_saleParams.tokenAmount - _saleParams.tokenAmount * WINNER_FEE / 10000)
                 * _saleParams.liquidityPercentage / 10000;
         } else {
             totalTokensForSale = _saleParams.hardCap * _saleParams.price / 1e18;
-            tokensForLiquidity = (_saleParams.hardCap - _saleParams.hardCap * WINNER_FEE / 10000)
-                * _saleParams.listingPrice * _saleParams.liquidityPercentage / 10000 / 1e18;
+            // tokensForLiquidity = (_saleParams.hardCap - _saleParams.hardCap * WINNER_FEE / 10000)
+            //     * _saleParams.listingPrice * _saleParams.liquidityPercentage / 10000 / 1e18;
+            tokensForLiquidity = (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000))
+                * _saleParams.liquidityPercentage / 10000;
         }
 
         // Transfer the tokens to the contract
@@ -166,21 +185,22 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         SaleState storage sale = sales[_saleId];
         SaleParams memory saleParams = sale.saleParams;
 
+        // Check if the sale is enabled and accepting contributions
+        require(sale.saleEnabled, "Sale is not enabled");
+        require(block.timestamp >= saleParams.startTimestamp, "Sale has not started yet");
+        require(block.timestamp <= saleParams.endTimestamp, "Sale has ended");
+
         if (address(saleParams.paymentToken) != address(0)) {
             // Transfer the payment token to the contract
             saleParams.paymentToken.transferFrom(msg.sender, address(this), _amount);
         } else {
             _amount = msg.value;
         }
-        // Check if the sale is enabled and accepting contributions
-        require(sale.saleEnabled, "Sale is not enabled");
-        require(block.timestamp >= saleParams.startTimestamp, "Sale has not started yet");
-        require(block.timestamp <= saleParams.endTimestamp, "Sale has ended");
-        require(sale.totalPaymentTokenContributed < saleParams.hardCap, "Sale has ended");
+        require(_amount > 0, "Amount must be greater than 0");
 
         Tier buyerTier = stakingRouter.getTier(msg.sender);
         if (saleParams.price == 0) {
-            require(buyerTier > Tier.Null, "Buyer tier is too low");
+            require(buyerTier > Tier.Null, "Buyer has no stake");
         } else {
             uint256 tierAllocation = getTierAllocation(_saleId, buyerTier);
             require(amountContributed[msg.sender][_saleId] + _amount <= tierAllocation, "Allocation exceeded");
@@ -195,30 +215,11 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             sale.softCapReached = true;
         }
 
-        // Check if the hard cap is reached
-        // For fair launches, the hard cap is 2^256 - 1, so this check will always fail
-        if (sale.totalPaymentTokenContributed >= saleParams.hardCap) {
-            // Refund the user if they contributed more than the hard cap
-            if (sale.totalPaymentTokenContributed > saleParams.hardCap) {
-                uint256 refundAmount = sale.totalPaymentTokenContributed - saleParams.hardCap;
-
-                sale.totalPaymentTokenContributed -= refundAmount;
-                amountContributed[msg.sender][_saleId] -= refundAmount;
-
-                if (address(saleParams.paymentToken) != address(0)) {
-                    saleParams.paymentToken.transfer(msg.sender, refundAmount);
-                } else {
-                    (bool sc,) = payable(msg.sender).call{value: refundAmount}("");
-                    require(sc, "Transfer failed");
-                }
-            }
-        }
-
         emit ContributionMade(msg.sender, _saleId, _amount);
     }
 
     /**
-     * @notice Function used by admins to end a sale
+     * @notice Function used users to claim their tokens after the sale has ended
      * @param _saleId The ID of the sale to claim tokens from
      */
     function claim(uint256 _saleId) external payable {
@@ -294,15 +295,11 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         SaleState storage sale = sales[_saleId];
         SaleParams memory saleParams = sale.saleParams;
 
+        // Check if the sale has reached the end timestamp
+        require(block.timestamp >= saleParams.endTimestamp, "Sale has not ended yet");
+
         // Check if the sale is not already ended
         require(!sale.saleEnded, "Sale has already ended");
-
-        // Check if the sale has reached the end timestamp or the hard cap
-        if (block.timestamp < saleParams.endTimestamp) {
-            require(sale.totalPaymentTokenContributed == saleParams.hardCap, "Sale has not reached hard cap");
-        } else {
-            require(block.timestamp >= saleParams.endTimestamp, "Sale has not ended yet");
-        }
 
         // Mark the sale as ended
         sale.saleEnded = true;
@@ -328,10 +325,10 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             }
 
             // Approve and add liquidity to the pool on PulseX
-            saleParams.token.approve(address(pulseRouter), tokensForLiquidity);
+            saleParams.token.approve(address(pulseXRouter), tokensForLiquidity);
             if (address(saleParams.paymentToken) != address(0)) {
-                saleParams.paymentToken.approve(address(pulseRouter), paymentTokenForLiquidity);
-                pulseRouter.addLiquidity(
+                saleParams.paymentToken.approve(address(pulseXRouter), paymentTokenForLiquidity);
+                pulseXRouter.addLiquidity(
                     address(saleParams.token),
                     address(saleParams.paymentToken),
                     tokensForLiquidity,
@@ -342,7 +339,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
                     block.timestamp + 1 days
                 );
             } else {
-                pulseRouter.addLiquidityETH{value: paymentTokenForLiquidity}(
+                pulseXRouter.addLiquidityETH{value: paymentTokenForLiquidity}(
                     address(saleParams.token),
                     tokensForLiquidity,
                     tokensForLiquidity,
@@ -354,11 +351,12 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
             // Lock the liquidity tokens and create a vesting schedule for the owner
             sale.liquidityUnlockTimestamp = block.timestamp + saleParams.liquidityLockupTime * 1 days;
-            address liquidityPool = IPulseXFactory(pulseRouter.factory()).getPair(
+            address liquidityPool = IPulseXFactory(pulseXRouter.factory()).getPair(
                 address(saleParams.token),
-                address(saleParams.paymentToken) == address(0) ? pulseRouter.WPLS() : address(saleParams.paymentToken)
+                address(saleParams.paymentToken) == address(0) ? pulseXRouter.WPLS() : address(saleParams.paymentToken)
             );
             uint256 liquidity = IERC20(liquidityPool).balanceOf(address(this));
+            IERC20(liquidityPool).approve(address(vestingContract), liquidity);
             vestingContract.createVestingSchedule(
                 liquidityPool,
                 saleParams.owner,
@@ -370,31 +368,39 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
             // If the sale is a presale and the hard cap is not reached
             if (saleParams.price > 0 && saleParams.hardCap != sale.totalPaymentTokenContributed) {
+                uint256 totalTokensToBeSold = saleParams.hardCap * saleParams.price / 1e18;
                 // Calculate the amount of tokens to refund from unslod tokens
                 uint256 totalTokensBought = sale.totalPaymentTokenContributed * saleParams.price / 1e18;
-                uint256 refundAmount = saleParams.hardCap * saleParams.price / 1e18 - totalTokensBought;
+                uint256 refundAmount = totalTokensToBeSold - totalTokensBought;
                 // Calculate the amount of tokens to refund from unused tokens for liquidity
-                uint256 totalDepositForLiquidity =
-                    saleParams.hardCap * saleParams.listingPrice * saleParams.liquidityPercentage / 10000 / 1e18;
+                uint256 totalDepositForLiquidity = (totalTokensToBeSold - totalTokensToBeSold * WINNER_FEE / 10000)
+                    * saleParams.liquidityPercentage / 10000;
                 uint256 refundForLiquidity = totalDepositForLiquidity - tokensForLiquidity;
                 refundAmount += refundForLiquidity;
                 // If the refund amount is greater than 0, refund the owner or burn the tokens(if refundType is false)
                 if (refundAmount > 0) {
-                    saleParams.token.transfer(saleParams.refundType ? saleParams.owner : address(0), refundAmount);
+                    saleParams.token.transfer(
+                        saleParams.refundType ? saleParams.owner : address(0x000000000000000000000000000000000000dEaD),
+                        refundAmount
+                    );
                 }
             }
             // Send the raised funds to the owner
             uint256 fundsToSend = raisedAfterFee - paymentTokenForLiquidity;
 
-            (bool sc,) = payable(saleParams.owner).call{value: fundsToSend}("");
-            require(sc, "Transfer failed");
+            if (address(saleParams.paymentToken) != address(0)) {
+                saleParams.paymentToken.transfer(saleParams.owner, fundsToSend);
+            } else {
+                (bool sc,) = payable(saleParams.owner).call{value: fundsToSend}("");
+                require(sc, "Transfer failed");
+            }
         } else {
             // If the soft cap is not reached, refund the owner their tokens
             uint256 refundAmount;
             uint256 tokensForLiquidity;
             if (saleParams.price == 0) {
                 refundAmount = saleParams.tokenAmount;
-                tokensForLiquidity = (saleParams.hardCap - saleParams.hardCap * WINNER_FEE / 10000)
+                tokensForLiquidity = (saleParams.tokenAmount - saleParams.tokenAmount * WINNER_FEE / 10000)
                     * saleParams.liquidityPercentage / 10000;
             } else {
                 refundAmount = saleParams.hardCap * saleParams.price / 1e18;
@@ -414,6 +420,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _saleId The ID of the sale to enable
      */
     function enableSale(uint256 _saleId) external onlyRole(ADMIN_ROLE) {
+        require(!sales[_saleId].saleEnabled, "Sale already enabled");
+        require(_saleId <= saleIdTracker.current(), "Invalid sale ID");
         sales[_saleId].saleEnabled = true;
 
         emit SaleEnabled(_saleId);
@@ -425,7 +433,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _state True if the token is supported, false otherwise
      */
     function setPaymentTokenState(address _token, bool _state) external onlyRole(ADMIN_ROLE) {
-        supportedPaymentTokens[_token] = _state;
+        isPaymentTokenSupported[_token] = _state;
     }
 
     /**
@@ -445,10 +453,17 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _buyerTier The tier of the buyer
      */
     function getTierAllocation(uint256 _saleId, Tier _buyerTier) public view returns (uint256) {
+        if (_buyerTier == Tier.Null) {
+            return 0;
+        }
+        if (stakingRouter.getStakersForTier(_buyerTier) == 0) {
+            return 0;
+        }
         uint256[6] memory stakersPerTier = stakingRouter.getStakersPerTier();
+        Tier[6] memory tiers = [Tier.Nano, Tier.Micro, Tier.Mega, Tier.Giga, Tier.Tera, Tier.TeraPlus];
         uint256 totalAllocationShares;
         for (uint256 i = 0; i < stakersPerTier.length; i++) {
-            totalAllocationShares += stakersPerTier[i] * tierWeights[_buyerTier];
+            totalAllocationShares += stakersPerTier[i] * tierWeights[tiers[i]];
         }
         return sales[_saleId].saleParams.hardCap * tierWeights[_buyerTier] / totalAllocationShares;
     }
@@ -458,17 +473,15 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _saleParams The sale parameters to check
      */
     function _checkSaleParams(SaleParams memory _saleParams) private view {
-        require(_saleParams.token != IERC20(address(0)), "Token cannot be 0 address");
-        if (address(_saleParams.paymentToken) != address(0)) {
-            require(supportedPaymentTokens[address(_saleParams.paymentToken)], "Payment token not supported");
-        }
-        require(_saleParams.owner != address(0), "Owner cannot be 0 address");
+        require(_saleParams.token != IERC20(address(0)), "Token cannot be address 0");
+        require(isPaymentTokenSupported[address(_saleParams.paymentToken)], "Payment token not supported");
+        require(_saleParams.owner != address(0), "Owner cannot be address 0");
         require(_saleParams.softCap > 0, "Soft cap must be greater than 0");
-        require(_saleParams.hardCap > 0, "Hard cap must be greater than 0");
         require(_saleParams.liquidityPercentage >= minimumLiquidityPercentage, "Liquidity percentage too low");
         require(_saleParams.liquidityPercentage <= 10000, "Liquidity percentage must be less than or equal to 10000");
         if (_saleParams.price > 0) {
             require(_saleParams.listingPrice > 0, "Listing price must be greater than 0");
+            require(_saleParams.hardCap >= _saleParams.softCap * 2, "Hard cap must be at least double the soft cap");
         }
         if (_saleParams.price == 0) {
             require(_saleParams.tokenAmount > 0, "Token amount must be greater than 0");

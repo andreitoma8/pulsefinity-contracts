@@ -10,21 +10,19 @@ contract MockPulseX {
 
     mapping(address => mapping(address => address)) public pairs;
 
-    constructor(address _factory, address _WPLS) {
-        factory_ = _factory;
+    constructor(address _WPLS) {
         WPLS_ = _WPLS;
     }
 
-    function addLiquidityETH(
-        address token,
-        uint256 amountTokenDesired,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline
-    ) external payable returns (uint256, uint256, uint256) {
+    function addLiquidityETH(address token, uint256 amountTokenDesired, uint256, uint256, address, uint256)
+        external
+        payable
+        returns (uint256, uint256, uint256)
+    {
         IERC20(token).transferFrom(msg.sender, address(this), amountTokenDesired);
         _createPair(token, WPLS_);
+        MockERC20 pair = MockERC20(pairs[token][WPLS_]);
+        pair.mint(msg.sender, 1e18);
     }
 
     function addLiquidity(
@@ -32,10 +30,10 @@ contract MockPulseX {
         address tokenB,
         uint256 amountADesired,
         uint256 amountBDesired,
-        uint256 amountAMin,
-        uint256 amountBMin,
+        uint256,
+        uint256,
         address to,
-        uint256 deadline
+        uint256
     ) external returns (uint256, uint256, uint256) {
         IERC20(tokenA).transferFrom(msg.sender, address(this), amountADesired);
         IERC20(tokenB).transferFrom(msg.sender, address(this), amountBDesired);
@@ -45,7 +43,7 @@ contract MockPulseX {
     }
 
     function factory() external view returns (address) {
-        return factory_;
+        return address(this);
     }
 
     function WPLS() external view returns (address) {

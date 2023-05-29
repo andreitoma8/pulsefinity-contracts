@@ -3,29 +3,11 @@ import chai, { expect } from "chai";
 import chaiAsPromised from "chai-as-promised";
 import { ethers } from "hardhat";
 import { upgrades } from "hardhat";
+import { LockType, Tier } from "./helpers/interfaces";
 
 import { PulsefinityStakingPool, StakingRouter, MockERC20 } from "../typechain-types";
 
 chai.use(chaiAsPromised);
-
-enum LockType {
-    Days15,
-    Days30,
-    Days60,
-    Days90,
-    Days180,
-    Days360,
-}
-
-enum Tier {
-    Null,
-    Nano,
-    Micro,
-    Mega,
-    Giga,
-    Tera,
-    TeraPlus,
-}
 
 describe("Staking", () => {
     let stakingPool: PulsefinityStakingPool;

@@ -33,6 +33,12 @@ interface IStakingRouter {
     function getStakersPerTier() external view returns (uint256[6] memory);
 
     /**
+     * @notice Returns the total stakers in a tier
+     * @param _tier The tier to query
+     */
+    function getStakersForTier(Tier _tier) external view returns (uint256);
+
+    /**
      * @notice Used by staking pools to update the number of stakers in a tier
      * @param _tier The tier to update
      * @param _isAddition If ture, increment the number of stakers in the tier, otherwise decrement
