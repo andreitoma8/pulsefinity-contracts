@@ -12,7 +12,7 @@ contract VestingContract is IVestingContract {
     using SafeERC20 for IERC20;
 
     /**
-     * @notice List of users to tokens to vesting schedules
+     * @notice Mapping of token address to beneficiary to vesting schedules array
      */
     mapping(address => mapping(address => VestingSchedule[])) public vestingSchedules;
 
@@ -88,7 +88,7 @@ contract VestingContract is IVestingContract {
      * @param _beneficiary The address of the beneficiary
      */
     function release(address _token, address _beneficiary) external {
-        VestingSchedule[] storage schedules = vestingSchedules[_beneficiary][_token];
+        VestingSchedule[] storage schedules = vestingSchedules[_token][_beneficiary];
         uint256 schedulesLength = schedules.length;
         require(schedulesLength > 0, "VestingContract: no vesting schedules for beneficiary");
 
@@ -118,12 +118,12 @@ contract VestingContract is IVestingContract {
      * @param _beneficiary The address of the beneficiary
      */
     function getReleaseableAmount(address _token, address _beneficiary) external view returns (uint256) {
-        VestingSchedule[] memory schedules = vestingSchedules[_beneficiary][_token];
+        VestingSchedule[] memory schedules = vestingSchedules[_token][_beneficiary];
         if (schedules.length == 0) return 0;
 
         uint256 amountToSend = 0;
         for (uint256 i = 0; i < schedules.length; i++) {
-            VestingSchedule memory schedule = vestingSchedules[_beneficiary][_token][i];
+            VestingSchedule memory schedule = vestingSchedules[_token][_beneficiary][i];
             amountToSend += releasableAmount(schedule);
         }
         return amountToSend;
@@ -142,7 +142,7 @@ contract VestingContract is IVestingContract {
      * @param _schedule The vesting schedule
      */
     function vestedAmount(VestingSchedule memory _schedule) public view returns (uint256) {
-        if (_schedule.duration == 0 && _schedule.start >= block.timestamp) {
+        if (_schedule.duration == 0 && _schedule.start <= block.timestamp) {
             return _schedule.amountTotal;
         }
         uint256 sliceInSeconds;
