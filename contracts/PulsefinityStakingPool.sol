@@ -69,7 +69,7 @@ contract PulsefinityStakingPool is IStakingPool, OwnableUpgradeable, ReentrancyG
          */
         uint256 shares;
         /**
-         * @notice The index of the stake in the stakes array
+         * @notice The reward index of the stake
          */
         uint256 rewardIndex;
         /**
@@ -144,6 +144,15 @@ contract PulsefinityStakingPool is IStakingPool, OwnableUpgradeable, ReentrancyG
         // Check if the tier of the user changes on this stake and update the stakersPerTier
         _checkTierChange(msg.sender, predictedTier);
 
+        /**
+         * @dev Calculates the shares of the user based on the amount and lock type
+         * For 15 days lock, shares = amount * 1.02
+         * For 30 days lock, shares = amount * 1.05
+         * For 60 days lock, shares = amount * 1.12
+         * For 90 days lock, shares = amount * 1.18
+         * For 180 days lock, shares = amount * 1.40
+         * For 365 days lock, shares = amount * 2.00
+         */
         uint256 shares = _multiplyByLock(_amount, _lockType);
 
         // Update the total staked and total shares
