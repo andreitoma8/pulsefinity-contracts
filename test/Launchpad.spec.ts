@@ -6,7 +6,7 @@ import { upgrades } from "hardhat";
 import { BigNumber } from "ethers";
 import { LockType, Tier, SaleParams, SaleState, DurationUnits } from "./helpers/interfaces";
 
-import { PulsefinityLaunchpad, PulsefinityStakingPool, StakingRouter, VestingContract, MockERC20, MockPulseX, MockWPLS } from "../typechain-types";
+import { PulsefinityLaunchpad, PulsefinityStakingPool, StakingRouter, VestingContract, MockERC20, MockPulseX } from "../typechain-types";
 
 chai.use(chaiAsPromised);
 
@@ -16,7 +16,6 @@ describe("Launchpad", () => {
     let stakingRouter: StakingRouter;
     let vesting: VestingContract;
 
-    let wpls: MockWPLS;
     let pulsefinity: MockERC20;
     let soldToken: MockERC20;
     let paymentToken: MockERC20;
@@ -40,6 +39,8 @@ describe("Launchpad", () => {
         tera: ethers.utils.parseEther("50"),
         teraPlus: ethers.utils.parseEther("60"),
     };
+
+    const wplsAddress = "0x4c79b8c9cB0BD62B047880603a9DEcf36dE28344"; // random address
 
     const getTime = async () => {
         const block = await ethers.provider.getBlock("latest");
@@ -86,9 +87,6 @@ describe("Launchpad", () => {
     });
 
     beforeEach(async () => {
-        const MockWPLSFactory = await ethers.getContractFactory("MockWPLS");
-        wpls = await MockWPLSFactory.deploy();
-
         const MockERC20Factory = await ethers.getContractFactory("MockERC20");
         pulsefinity = await MockERC20Factory.deploy("Pulsefinity", "PULSE");
         soldToken = await MockERC20Factory.deploy("Sold Token", "SOLD");
@@ -96,7 +94,7 @@ describe("Launchpad", () => {
         rewardToken = await MockERC20Factory.deploy("Reward Token", "REWARD");
 
         const MockPulseXFactory = await ethers.getContractFactory("MockPulseX");
-        pulseX = await MockPulseXFactory.deploy(wpls.address);
+        pulseX = await MockPulseXFactory.deploy(wplsAddress);
 
         const StakingRouterFactory = await ethers.getContractFactory("StakingRouter");
         stakingRouter = (await upgrades.deployProxy(StakingRouterFactory, [pulsefinity.address, tierLimits], { kind: "uups" })) as StakingRouter;
@@ -131,8 +129,15 @@ describe("Launchpad", () => {
 
             expect(await launchpad.isPaymentTokenSupported(ethers.constants.AddressZero)).to.equal(true);
 
-            expect(await launchpad.hasRole(await launchpad.DEFAULT_ADMIN_ROLE(), deployer.address)).to.equal(true);
+            expect(await launchpad.hasRole(await launchpad.OWNER_ROLE(), deployer.address)).to.equal(true);
             expect(await launchpad.hasRole(await launchpad.ADMIN_ROLE(), deployer.address)).to.equal(true);
+            expect(await launchpad.getRoleAdmin(await launchpad.ADMIN_ROLE())).to.equal(await launchpad.OWNER_ROLE());
+        });
+    });
+
+    describe("upgradeTo", () => {
+        it("should revert if not owner", async () => {
+            await expect(launchpad.connect(alice).upgradeTo(wplsAddress)).to.be.reverted;
         });
     });
 
@@ -925,7 +930,7 @@ describe("Launchpad", () => {
             await increaseTime(3600);
             await launchpad.connect(alice).endSale(1);
 
-            const liquidityToken = await pulseX.getPair(saleParams.token, wpls.address);
+            const liquidityToken = await pulseX.getPair(saleParams.token, wplsAddress);
             const liquidityVestingSchedule = (await vesting.getVestingSchedules(liquidityToken, deployer.address))[0];
             expect(liquidityVestingSchedule.amountTotal).to.be.eq(ethers.utils.parseEther("1"));
             expect(liquidityVestingSchedule.duration).to.eq(saleParams.liquidityLockupTime);

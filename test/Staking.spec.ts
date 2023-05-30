@@ -83,6 +83,12 @@ describe("Staking", () => {
             });
         });
 
+        describe("upgradeTo", () => {
+            it("should revert if not owner", async () => {
+                await expect(stakingPool.connect(alice).upgradeTo(alice.address)).to.be.revertedWith("Ownable: caller is not the owner");
+            });
+        });
+
         describe("stake", () => {
             it("should revert if amount is 0", async () => {
                 await expect(stakingPool.stake(0, LockType.Days15)).to.be.revertedWith("Cannot stake 0");
@@ -484,6 +490,12 @@ describe("Staking", () => {
                 expect(await stakingRouter.owner()).to.equal(deployer.address);
                 expect(await stakingRouter.pulsefinityToken()).to.equal(pulsefinity.address);
                 expect(await stakingRouter.tierLimits()).to.deep.equal(Object.values(tierLimits));
+            });
+        });
+
+        describe("upgradeTo", () => {
+            it("should revert if not owner", async () => {
+                await expect(stakingRouter.connect(alice).upgradeTo(alice.address)).to.be.revertedWith("Ownable: caller is not the owner");
             });
         });
 
