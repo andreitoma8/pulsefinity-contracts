@@ -103,15 +103,30 @@ contract StakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
      * @notice Returns an array of the number of stakers in each tier
      * [Nano, Micro, Mega, Giga, Tera, TeraPlus]
      */
-    function getStakersPerTier() external view override returns (uint256[6] memory) {
-        uint256[6] memory _stakersPerTier;
-        _stakersPerTier[uint256(Tier.Nano) - 1] = stakersPerTier[Tier.Nano];
-        _stakersPerTier[uint256(Tier.Micro) - 1] = stakersPerTier[Tier.Micro];
-        _stakersPerTier[uint256(Tier.Mega) - 1] = stakersPerTier[Tier.Mega];
-        _stakersPerTier[uint256(Tier.Giga) - 1] = stakersPerTier[Tier.Giga];
-        _stakersPerTier[uint256(Tier.Tera) - 1] = stakersPerTier[Tier.Tera];
-        _stakersPerTier[uint256(Tier.TeraPlus) - 1] = stakersPerTier[Tier.TeraPlus];
-        return _stakersPerTier;
+    function getStakersPerTier() external view returns (uint256[6] memory stakersPerTier_) {
+        assembly {
+            // Get the starting slot of the returned array
+            let returnSlot := stakersPerTier_
+            // Store the slot of the stakersPerTier mapping in memory for easy access
+            mstore(0x20, stakersPerTier.slot)
+            // Function to return the value in the stakersPerTier mapping
+            function getTierWeight(slot, key) -> r {
+                // Store the key in memory for keccak256
+                mstore(0x00, key)
+                // Compute the storage slot of the value mapped to the key
+                let valueSlot := keccak256(0x00, 0x40)
+                r := sload(valueSlot)
+            }
+
+            // Store each of the of the stakersPerTier values in the return array
+            // at the index corresponding to the tier
+            mstore(returnSlot, getTierWeight(stakersPerTier.slot, 1))
+            mstore(add(returnSlot, 0x20), getTierWeight(stakersPerTier.slot, 2))
+            mstore(add(returnSlot, 0x40), getTierWeight(stakersPerTier.slot, 3))
+            mstore(add(returnSlot, 0x60), getTierWeight(stakersPerTier.slot, 4))
+            mstore(add(returnSlot, 0x80), getTierWeight(stakersPerTier.slot, 5))
+            mstore(add(returnSlot, 0xa0), getTierWeight(stakersPerTier.slot, 6))
+        }
     }
 
     /**
