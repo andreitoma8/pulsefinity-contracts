@@ -18,6 +18,8 @@ import "./interfaces/IStakingRouter.sol";
 contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     using CountersUpgradeable for CountersUpgradeable.Counter;
 
+    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     uint256 public constant WINNER_FEE = 2000; // 20% in BPS
 
@@ -52,6 +54,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         bool softCapReached; // true if soft cap is reached
         bool saleEnded; // true if sale is ended
         uint256 totalPaymentTokenContributed; // total PLS/payment token contributed
+        uint256 totalTokensSold; // total tokens to be sold
+        uint256 totalTokensForLiquidity; // total tokens to be added to liquidity
         uint256 liquidityUnlockTimestamp; // Unix timestamp
         SaleParams saleParams; // SaleParams struct
     }
@@ -116,8 +120,13 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         IPulseXFactory _pulseXFactory,
         IVestingContract _vestingContract
     ) external initializer {
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        // Set deployer as owner, upgrader and admin
+        _setupRole(OWNER_ROLE, msg.sender);
+        _setupRole(UPGRADER_ROLE, msg.sender);
         _setupRole(ADMIN_ROLE, msg.sender);
+        // Set OWNER_ROLE as admin for ADMIN_ROLE and UPGRADER_ROLE
+        _setRoleAdmin(ADMIN_ROLE, OWNER_ROLE);
+        _setRoleAdmin(UPGRADER_ROLE, OWNER_ROLE);
 
         // Set the contract addresses
         stakingRouter = _stakingRouter;
@@ -160,8 +169,10 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         // compute the tokens needed for the sale and LP creation
         uint256 totalTokensForSale =
             _saleParams.price == 0 ? _saleParams.tokenAmount : _saleParams.hardCap * _saleParams.price / 1e18;
+        sales[saleId].totalTokensSold = totalTokensForSale;
         uint256 tokensForLiquidity =
             (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000)) * _saleParams.liquidityPercentage / 10000;
+        sales[saleId].totalTokensForLiquidity = tokensForLiquidity;
 
         // Transfer the tokens to the contract
         _saleParams.token.transferFrom(msg.sender, address(this), totalTokensForSale + tokensForLiquidity);
@@ -241,14 +252,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             }
             // If the sale is a vested sale, create a vesting schedule for the user
             if (saleParams.isVestedSale) {
-                // approve the vesting contract to spend the tokens
-                saleParams.token.approve(address(vestingContract), tokensBought);
                 // if the vesting schedule includes a TGE unlock, send the tokens to the user
                 if (saleParams.tgeUnlockPercentage > 0) {
                     uint256 tgeTokens = tokensBought * saleParams.tgeUnlockPercentage / 10000;
                     saleParams.token.transfer(msg.sender, tgeTokens);
                     tokensBought -= tgeTokens;
                 }
+                // approve the vesting contract to spend the tokens
+                saleParams.token.approve(address(vestingContract), tokensBought);
                 // create the vesting schedule
                 vestingContract.createVestingSchedule(
                     address(saleParams.token),
@@ -360,16 +371,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
             // If the sale is a presale and the hard cap is not reached
             if (saleParams.price > 0 && saleParams.hardCap != sale.totalPaymentTokenContributed) {
-                uint256 totalTokensToBeSold = saleParams.hardCap * saleParams.price / 1e18;
                 // Calculate the amount of tokens to refund from unslod tokens
                 uint256 totalTokensBought = sale.totalPaymentTokenContributed * saleParams.price / 1e18;
-                uint256 refundAmount = totalTokensToBeSold - totalTokensBought;
+                uint256 refundAmount = sale.totalTokensSold - totalTokensBought;
                 // Calculate the amount of tokens to refund from unused tokens for liquidity
-                uint256 totalDepositForLiquidity = (totalTokensToBeSold - totalTokensToBeSold * WINNER_FEE / 10000)
-                    * saleParams.liquidityPercentage / 10000;
-                uint256 refundForLiquidity = totalDepositForLiquidity - tokensForLiquidity;
+                uint256 refundForLiquidity = sale.totalTokensForLiquidity - tokensForLiquidity;
                 refundAmount += refundForLiquidity;
-                // If the refund amount is greater than 0, refund the owner or burn the tokens(if refundType is false)
+                // If the refund amount is greater than 0, refund the owner or burn the tokens(if refundType is false,
+                // sending to address 0xdead for burn in case the token is not burnable or does not allow transfers to 0x0)
                 if (refundAmount > 0) {
                     saleParams.token.transfer(
                         saleParams.refundType ? saleParams.owner : address(0x000000000000000000000000000000000000dEaD),
@@ -388,20 +397,9 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             }
         } else {
             // If the soft cap is not reached, refund the owner their tokens
-            uint256 refundAmount;
-            uint256 tokensForLiquidity;
-            if (saleParams.price == 0) {
-                refundAmount = saleParams.tokenAmount;
-                tokensForLiquidity = (saleParams.tokenAmount - saleParams.tokenAmount * WINNER_FEE / 10000)
-                    * saleParams.liquidityPercentage / 10000;
-            } else {
-                refundAmount = saleParams.hardCap * saleParams.price / 1e18;
-                tokensForLiquidity = (saleParams.hardCap - saleParams.hardCap * WINNER_FEE / 10000)
-                    * saleParams.listingPrice * saleParams.liquidityPercentage / 10000 / 1e18;
-            }
-            refundAmount += tokensForLiquidity;
+            // and the contributors will be able to withdraw their funds with claim()
             // Transfer the tokens to the owner or burn them(if refundType is false)
-            saleParams.token.transfer(saleParams.owner, refundAmount);
+            saleParams.token.transfer(saleParams.owner, sale.totalTokensSold + sale.totalTokensForLiquidity);
         }
 
         emit SaleEnded(_saleId, sale.softCapReached);
@@ -432,7 +430,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @notice Function used by the owner to withdraw tokens from the fee pool
      * @param _amount Amount to withdraw from the fee pool
      */
-    function withdrawFee(address _token, uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function withdrawFee(address _token, uint256 _amount) external onlyRole(OWNER_ROLE) {
         require(_amount <= feePool[_token], "Amount exceeds fee pool balance");
         feePool[_token] -= _amount;
         if (_token != address(0)) {
@@ -453,10 +451,9 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             return 0;
         }
         uint256[6] memory stakersPerTier = stakingRouter.getStakersPerTier();
-        Tier[6] memory tiers = [Tier.Nano, Tier.Micro, Tier.Mega, Tier.Giga, Tier.Tera, Tier.TeraPlus];
         uint256 totalAllocationShares;
         for (uint256 i = 0; i < stakersPerTier.length; i++) {
-            totalAllocationShares += stakersPerTier[i] * tierWeights[tiers[i]];
+            totalAllocationShares += stakersPerTier[i] * tierWeights[Tier(i + 1)];
         }
         return sales[_saleId].saleParams.hardCap * tierWeights[_buyerTier] / totalAllocationShares;
     }
@@ -488,5 +485,5 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @notice This function is used to upgrade the contract
      * @param newImplementation The address of the new implementation
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
 }
