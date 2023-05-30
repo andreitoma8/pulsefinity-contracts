@@ -22,7 +22,7 @@ describe("VestingContract", () => {
 
     let startTime: number;
 
-    const amountToLock = ethers.utils.parseEther("5250000");
+    const amountToLock = ethers.utils.parseEther("42069");
     const duration = 20;
 
     const increaseTime = async (seconds: number) => {
@@ -58,6 +58,12 @@ describe("VestingContract", () => {
             await expect(vesting.createVestingSchedule(token.address, user.address, startTime, duration, DurationUnits.Months, 0)).to.be.revertedWith(
                 "VestingContract: amount is 0"
             );
+        });
+
+        it("should revert if start is in the past", async () => {
+            await expect(
+                vesting.createVestingSchedule(token.address, user.address, startTime - 60, duration, DurationUnits.Months, amountToLock)
+            ).to.be.revertedWith("VestingContract: start time is before current time");
         });
 
         it("should transfer tokens to vesting contract", async () => {
@@ -145,9 +151,7 @@ describe("VestingContract", () => {
         it("should correctly return the releasable amount", async () => {
             await vesting.createVestingSchedule(token.address, user.address, startTime, duration, DurationUnits.Months, amountToLock);
 
-            await increaseTime(61);
-
-            await increaseTime(60 * 60 * 24 * 30);
+            await increaseTime(duration * 60 * 60 * 24 * 30 + 61);
 
             const releasableAmountBefore = await vesting.getReleaseableAmount(token.address, user.address);
 
@@ -201,9 +205,7 @@ describe("VestingContract", () => {
         it("should correctly return the releasable amount", async () => {
             await vesting.createVestingSchedule(token.address, user.address, startTime, duration, DurationUnits.Months, amountToLock);
 
-            await increaseTime(61);
-
-            await increaseTime(60 * 60 * 24 * 30);
+            await increaseTime(60 * 60 * 24 * 30 + 61);
 
             const releasableAmount = await vesting.getReleaseableAmount(token.address, user.address);
 
