@@ -170,8 +170,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         uint256 totalTokensForSale =
             _saleParams.price == 0 ? _saleParams.tokenAmount : _saleParams.hardCap * _saleParams.price / 1e18;
         sales[saleId].totalTokensSold = totalTokensForSale;
-        uint256 tokensForLiquidity =
-            (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000)) * _saleParams.liquidityPercentage / 10000;
+        uint256 tokensForLiquidity;
+        if (_saleParams.price == 0) {
+            tokensForLiquidity = (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000))
+                * _saleParams.liquidityPercentage / 10000;
+        } else {
+            tokensForLiquidity = (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000))
+                * _saleParams.liquidityPercentage * 1e18 / _saleParams.listingPrice / 10000;
+        }
         sales[saleId].totalTokensForLiquidity = tokensForLiquidity;
 
         // Transfer the tokens to the contract
@@ -317,14 +323,12 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             // Calculate the amount of PLS/payment tokens and sold tokens to add liquidity with
             uint256 paymentTokenForLiquidity = raisedAfterFee * saleParams.liquidityPercentage / 10000;
             uint256 tokensForLiquidity;
-            if (saleParams.price != 0) {
-                // If the sale is a presale, calculate the amount of tokens to add liquidity
-                // with using the listing price
-                tokensForLiquidity = paymentTokenForLiquidity * saleParams.listingPrice / 1e18;
+
+            if (saleParams.price == 0) {
+                tokensForLiquidity = saleParams.tokenAmount;
             } else {
-                // If the sale is a fair launch, calculate the amount of tokens to add liquidity
-                // with using the total tokens available for the sale
-                tokensForLiquidity = paymentTokenForLiquidity * saleParams.tokenAmount / raisedAfterFee;
+                tokensForLiquidity =
+                    raisedAfterFee * saleParams.liquidityPercentage * 1e18 / 10000 / saleParams.listingPrice;
             }
 
             // Approve and add liquidity to the pool on PulseX
@@ -371,7 +375,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
             // If the sale is a presale and the hard cap is not reached
             if (saleParams.price > 0 && saleParams.hardCap != sale.totalPaymentTokenContributed) {
-                // Calculate the amount of tokens to refund from unslod tokens
+                // Calculate the amount of tokens to refund from unsold tokens
                 uint256 totalTokensBought = sale.totalPaymentTokenContributed * saleParams.price / 1e18;
                 uint256 refundAmount = sale.totalTokensSold - totalTokensBought;
                 // Calculate the amount of tokens to refund from unused tokens for liquidity
