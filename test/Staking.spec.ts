@@ -56,6 +56,12 @@ describe("Staking", () => {
 
     describe("PulsefinityStakingPool", () => {
         describe("initializer", () => {
+            it("should not be able to initialize twice", async () => {
+                await expect(stakingPool.initialize(pulsefinity.address, rewardToken.address, stakingRouter.address, Tier.Nano)).to.be.revertedWith(
+                    "Initializable: contract is already initialized"
+                );
+            });
+
             it("should correctly initialize staking for ERC20 reward token", async () => {
                 expect(await stakingPool.pulsefinityToken()).to.equal(pulsefinity.address);
                 expect(await stakingPool.rewardToken()).to.equal(rewardToken.address);
@@ -377,6 +383,10 @@ describe("Staking", () => {
         describe("withdrawRewardSurplus", () => {
             const rewardsSurplus = ethers.utils.parseEther("50");
 
+            it("should revert if caller is not owner", async () => {
+                await expect(stakingPool.connect(alice).withdrawRewardSurplus()).to.be.revertedWith("Ownable: caller is not the owner");
+            });
+
             it("should revert if rewards token is native token", async () => {
                 const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
                 stakingPool = (await upgrades.deployProxy(
@@ -448,6 +458,7 @@ describe("Staking", () => {
 
     describe("StakingRouter", () => {
         let stakingPool2: PulsefinityStakingPool;
+        let stakingPool3: PulsefinityStakingPool;
         beforeEach(async () => {
             const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
             stakingPool2 = (await upgrades.deployProxy(
@@ -456,9 +467,19 @@ describe("Staking", () => {
                 { kind: "uups" }
             )) as PulsefinityStakingPool;
             await stakingRouter.addStakingPool(stakingPool2.address);
+            stakingPool3 = (await upgrades.deployProxy(
+                PulsefinityStakingPoolFactory,
+                [pulsefinity.address, ethers.constants.AddressZero, stakingRouter.address, Tier.Nano],
+                { kind: "uups" }
+            )) as PulsefinityStakingPool;
+            await stakingRouter.addStakingPool(stakingPool3.address);
         });
 
         describe("initializer", () => {
+            it("should not be able to initialize twice", async () => {
+                await expect(stakingRouter.initialize(pulsefinity.address, tierLimits)).to.be.revertedWith("Initializable: contract is already initialized");
+            });
+
             it("should correctly initialize the contract", async () => {
                 expect(await stakingRouter.owner()).to.equal(deployer.address);
                 expect(await stakingRouter.pulsefinityToken()).to.equal(pulsefinity.address);
@@ -467,6 +488,10 @@ describe("Staking", () => {
         });
 
         describe("addStakingPool", () => {
+            it("should revert if caller is not owner", async () => {
+                await expect(stakingRouter.connect(alice).addStakingPool(stakingPool.address)).to.be.revertedWith("Ownable: caller is not the owner");
+            });
+
             it("should revert if staking pool is already added", async () => {
                 await expect(stakingRouter.addStakingPool(stakingPool.address)).to.be.revertedWith("Staking pool already added");
             });
@@ -478,17 +503,29 @@ describe("Staking", () => {
         });
 
         describe("removeStakingPool", () => {
+            it("should revert if caller is not owner", async () => {
+                await expect(stakingRouter.connect(alice).removeStakingPool(stakingPool2.address)).to.be.revertedWith("Ownable: caller is not the owner");
+            });
+
             it("should revert if index is out of bounds", async () => {
-                await expect(stakingRouter.removeStakingPool(2)).to.be.revertedWith("Index out of bounds");
+                await expect(stakingRouter.removeStakingPool(3)).to.be.revertedWith("Index out of bounds");
             });
 
             it("should correctly remove staking pool", async () => {
+                await stakingRouter.removeStakingPool(0);
+                expect(await stakingRouter.isStakingPool(stakingPool.address)).to.equal(false);
+
+                const stakingPoolsIndex1 = await stakingRouter.stakingPools(1);
                 await stakingRouter.removeStakingPool(1);
-                expect(await stakingRouter.isStakingPool(stakingPool2.address)).to.equal(false);
+                expect(await stakingRouter.isStakingPool(stakingPoolsIndex1)).to.equal(false);
             });
         });
 
         describe("setTiers", () => {
+            it("should revert if caller is not owner", async () => {
+                await expect(stakingRouter.connect(alice).setTiers(tierLimits)).to.be.revertedWith("Ownable: caller is not the owner");
+            });
+
             it("should correctly set tier limit", async () => {
                 const newTierLimits = {
                     nano: ethers.utils.parseEther("100"),

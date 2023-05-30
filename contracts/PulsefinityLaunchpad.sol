@@ -10,8 +10,6 @@ import "./interfaces/IPulseXFactory.sol";
 import "./interfaces/IVestingContract.sol";
 import "./interfaces/IStakingRouter.sol";
 
-import "hardhat/console.sol";
-
 /**
  * @title PulsefinityLaunchpad
  * @author andreitoma8
@@ -60,7 +58,6 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
     uint256 public minimumLiqudityLockupTime; // in days
     uint256 public minimumLiquidityPercentage; // BPS
-    uint256 public feePool; // total fees collected
 
     CountersUpgradeable.Counter public saleIdTracker;
 
@@ -80,14 +77,14 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     mapping(address => bool) public isPaymentTokenSupported;
 
     /**
+     * @notice Mapping of token address to winner fee collected(address(0) = PLS)
+     */
+    mapping(address => uint256) public feePool;
+
+    /**
      * @notice Mapping of buyer address to sale ID to amount contributed
      */
     mapping(address => mapping(uint256 => uint256)) public amountContributed;
-
-    /**
-     * @notice Mapping of sale ID to Tier to amount contributed
-     */
-    mapping(uint256 => mapping(Tier => uint256)) public amountContributedPerTier;
 
     event SaleCreated(address indexed owner, uint256 indexed saleId);
 
@@ -109,7 +106,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Initializes the contract, setting msg.sender as admin and setting the PulseXRouter and PulseXFactory contracts
+     * @notice Initializes the contract
      * @param _pulseXRouter The PulseXRouter contract
      * @param _pulseXFactory The PulseXFactory contract
      */
@@ -122,16 +119,20 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(ADMIN_ROLE, msg.sender);
 
+        // Set the contract addresses
         stakingRouter = _stakingRouter;
         pulseXRouter = _pulseXRouter;
         pulseXFactory = _pulseXFactory;
         vestingContract = _vestingContract;
 
+        // Set the native token as supported payment token
         isPaymentTokenSupported[address(0)] = true;
 
+        // Set the minimum liquidity lockup time and minimum liquidity percentage
         minimumLiqudityLockupTime = 60;
         minimumLiquidityPercentage = 5000;
 
+        // Set the tier weights
         tierWeights[Tier.Nano] = 1;
         tierWeights[Tier.Micro] = 2;
         tierWeights[Tier.Mega] = 4;
@@ -157,19 +158,10 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         sales[saleId].saleParams = _saleParams;
 
         // compute the tokens needed for the sale and LP creation
-        uint256 totalTokensForSale;
-        uint256 tokensForLiquidity;
-        if (_saleParams.price == 0) {
-            totalTokensForSale = _saleParams.tokenAmount;
-            tokensForLiquidity = (_saleParams.tokenAmount - _saleParams.tokenAmount * WINNER_FEE / 10000)
-                * _saleParams.liquidityPercentage / 10000;
-        } else {
-            totalTokensForSale = _saleParams.hardCap * _saleParams.price / 1e18;
-            // tokensForLiquidity = (_saleParams.hardCap - _saleParams.hardCap * WINNER_FEE / 10000)
-            //     * _saleParams.listingPrice * _saleParams.liquidityPercentage / 10000 / 1e18;
-            tokensForLiquidity = (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000))
-                * _saleParams.liquidityPercentage / 10000;
-        }
+        uint256 totalTokensForSale =
+            _saleParams.price == 0 ? _saleParams.tokenAmount : _saleParams.hardCap * _saleParams.price / 1e18;
+        uint256 tokensForLiquidity =
+            (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000)) * _saleParams.liquidityPercentage / 10000;
 
         // Transfer the tokens to the contract
         _saleParams.token.transferFrom(msg.sender, address(this), totalTokensForSale + tokensForLiquidity);
@@ -230,6 +222,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         require(sales[_saleId].saleEnded, "Sale has not ended");
 
         uint256 contributed = amountContributed[msg.sender][_saleId];
+        amountContributed[msg.sender][_saleId] = 0;
 
         // Check if the user has contributed to this sale
         require(contributed > 0, "Nothing to claim");
@@ -244,10 +237,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             } else {
                 // If the sale is a presale, calculate the amount of tokens bought using
                 // the amount contributed and the price
-                contributed * saleParams.price / 1e18;
+                tokensBought = contributed * saleParams.price / 1e18;
             }
-            // Reset the amount contributed
-            amountContributed[msg.sender][_saleId] = 0;
             // If the sale is a vested sale, create a vesting schedule for the user
             if (saleParams.isVestedSale) {
                 // approve the vesting contract to spend the tokens
@@ -275,7 +266,6 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             emit TokensClaimed(msg.sender, _saleId, tokensBought);
         } else {
             // If the soft cap is not reached, refund the user their contribution
-            amountContributed[msg.sender][_saleId] = 0;
             if (address(saleParams.paymentToken) != address(0)) {
                 saleParams.paymentToken.transfer(msg.sender, contributed);
             } else {
@@ -292,6 +282,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _saleId The ID of the sale to end
      */
     function endSale(uint256 _saleId) public {
+        require(_saleId > 0 && _saleId <= saleIdTracker.current(), "Sale does not exist");
+
         SaleState storage sale = sales[_saleId];
         SaleParams memory saleParams = sale.saleParams;
 
@@ -308,7 +300,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         if (sale.softCapReached) {
             // Calculate the winner fee and the amount raised after the fee
             uint256 winnerFee = sale.totalPaymentTokenContributed * WINNER_FEE / 10000;
-            feePool += winnerFee;
+            feePool[address(saleParams.paymentToken)] += winnerFee;
             uint256 raisedAfterFee = sale.totalPaymentTokenContributed - winnerFee;
 
             // Calculate the amount of PLS/payment tokens and sold tokens to add liquidity with
@@ -360,8 +352,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             vestingContract.createVestingSchedule(
                 liquidityPool,
                 saleParams.owner,
+                block.timestamp,
                 saleParams.liquidityLockupTime,
-                0,
                 IVestingContract.DurationUnits.Days,
                 liquidity
             );
@@ -440,11 +432,15 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @notice Function used by the owner to withdraw tokens from the fee pool
      * @param _amount Amount to withdraw from the fee pool
      */
-    function withdrawFee(uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_amount <= feePool, "Not enough balance");
-        feePool -= _amount;
-        (bool sc,) = payable(msg.sender).call{value: _amount}("");
-        require(sc, "Transfer failed");
+    function withdrawFee(address _token, uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_amount <= feePool[_token], "Amount exceeds fee pool balance");
+        feePool[_token] -= _amount;
+        if (_token != address(0)) {
+            IERC20(_token).transfer(msg.sender, _amount);
+        } else {
+            (bool sc,) = payable(msg.sender).call{value: _amount}("");
+            require(sc, "Transfer failed");
+        }
     }
 
     /**
@@ -453,10 +449,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _buyerTier The tier of the buyer
      */
     function getTierAllocation(uint256 _saleId, Tier _buyerTier) public view returns (uint256) {
-        if (_buyerTier == Tier.Null) {
-            return 0;
-        }
-        if (stakingRouter.getStakersForTier(_buyerTier) == 0) {
+        if (_buyerTier == Tier.Null || stakingRouter.getStakersForTier(_buyerTier) == 0) {
             return 0;
         }
         uint256[6] memory stakersPerTier = stakingRouter.getStakersPerTier();

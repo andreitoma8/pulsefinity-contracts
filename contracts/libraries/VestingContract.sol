@@ -18,13 +18,19 @@ contract VestingContract is IVestingContract {
 
     /**
      * @notice Emitted when a vesting schedule is created
+     * @param token The token to be vested
      * @param beneficiary The address of the beneficiary
      * @param start The start UNIX timestamp of the vesting period
      * @param duration The duration of the vesting period in DurationUnits
      * @param durationUnits The units of the duration(0 = days, 1 = weeks, 2 = months)
      */
     event VestingScheduleCreated(
-        address indexed beneficiary, uint256 start, uint256 duration, DurationUnits durationUnits, uint256 amountTotal
+        address indexed token,
+        address indexed beneficiary,
+        uint256 start,
+        uint256 duration,
+        DurationUnits durationUnits,
+        uint256 amountTotal
     );
 
     /**
@@ -56,15 +62,13 @@ contract VestingContract is IVestingContract {
         // perform input checks
         require(_beneficiary != address(0), "VestingContract: beneficiary is the zero address");
         require(_amountTotal > 0, "VestingContract: amount is 0");
-        if (_start < block.timestamp) {
-            _start = block.timestamp;
-        }
+        require(_start >= block.timestamp, "VestingContract: start time is before current time");
 
         // transfer the tokens to be locked to the contract
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amountTotal);
 
         // create the vesting schedule and add it to the list of schedules for the beneficiary
-        vestingSchedules[_beneficiary][_token].push(
+        vestingSchedules[_token][_beneficiary].push(
             VestingSchedule({
                 beneficiary: _beneficiary,
                 start: _start,
@@ -75,7 +79,7 @@ contract VestingContract is IVestingContract {
             })
         );
 
-        emit VestingScheduleCreated(_beneficiary, _start, _duration, _durationUnits, _amountTotal);
+        emit VestingScheduleCreated(_token, _beneficiary, _start, _duration, _durationUnits, _amountTotal);
     }
 
     /**
@@ -157,5 +161,13 @@ contract VestingContract is IVestingContract {
             uint256 monthsPassed = (block.timestamp - _schedule.start) / sliceInSeconds;
             return (_schedule.amountTotal * monthsPassed) / _schedule.duration;
         }
+    }
+
+    function getVestingSchedules(address _token, address _beneficiary)
+        external
+        view
+        returns (VestingSchedule[] memory)
+    {
+        return vestingSchedules[_token][_beneficiary];
     }
 }

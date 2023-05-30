@@ -118,6 +118,12 @@ describe("Launchpad", () => {
     });
 
     describe("initialize", () => {
+        it("should not allow to initialize twice", async () => {
+            await expect(launchpad.initialize(stakingRouter.address, pulseX.address, pulseX.address, vesting.address)).to.be.revertedWith(
+                "Initializable: contract is already initialized"
+            );
+        });
+
         it("should correctly initialize the contract", async () => {
             expect(await launchpad.stakingRouter()).to.equal(stakingRouter.address);
             expect(await launchpad.pulseXRouter()).to.equal(pulseX.address);
@@ -874,6 +880,11 @@ describe("Launchpad", () => {
             await increaseTime(61);
         });
 
+        it("should revert if param saleId is invalid", async () => {
+            await expect(launchpad.endSale(0)).to.be.revertedWith("Sale does not exist");
+            await expect(launchpad.endSale(2)).to.be.revertedWith("Sale does not exist");
+        });
+
         it("should revert if the sale end timestamp has not been reached", async () => {
             await expect(launchpad.connect(deployer).endSale(1)).to.be.revertedWith("Sale has not ended yet");
         });
@@ -913,6 +924,12 @@ describe("Launchpad", () => {
 
             await increaseTime(3600);
             await launchpad.connect(alice).endSale(1);
+
+            const liquidityToken = await pulseX.getPair(saleParams.token, wpls.address);
+            const liquidityVestingSchedule = (await vesting.getVestingSchedules(liquidityToken, deployer.address))[0];
+            expect(liquidityVestingSchedule.amountTotal).to.be.eq(ethers.utils.parseEther("1"));
+            expect(liquidityVestingSchedule.duration).to.eq(saleParams.liquidityLockupTime);
+            expect(liquidityVestingSchedule.durationUnits).to.eq(DurationUnits.Days);
 
             const saleState = await launchpad.sales(1);
             expect(saleState.saleEnded).to.eq(true);
@@ -1169,6 +1186,561 @@ describe("Launchpad", () => {
             const saleState = await launchpad.sales(2);
             expect(saleState.saleEnded).to.eq(true);
             expect(saleState.softCapReached).to.eq(false);
+        });
+    });
+
+    describe("claim", () => {
+        beforeEach(async () => {
+            await stake(alice, tierLimits.nano);
+            await stake(bob, tierLimits.micro);
+            await stake(charlie, tierLimits.mega);
+
+            const saleParams: SaleParams = {
+                token: soldToken.address,
+                paymentToken: ethers.constants.AddressZero,
+                owner: deployer.address,
+                tokenAmount: ethers.utils.parseEther("100"),
+                price: ethers.utils.parseEther("1"),
+                softCap: ethers.utils.parseEther("20"),
+                hardCap: ethers.utils.parseEther("50"),
+                liquidityPercentage: 5000,
+                listingPrice: ethers.utils.parseEther("1"),
+                liquidityLockupTime: 365,
+                startTimestamp: (await getTime()) + 60,
+                endTimestamp: (await getTime()) + 3660,
+                refundType: true,
+                isVestedSale: false,
+                tgeUnlockPercentage: 0,
+                vestingStart: 0,
+                vestingDuration: 0,
+                vestingDurationUnits: DurationUnits.Days,
+            };
+
+            await createSale(saleParams);
+
+            await launchpad.enableSale(1);
+
+            await increaseTime(61);
+        });
+
+        it("should revert if the sale has not ended", async () => {
+            await expect(launchpad.claim(1)).to.be.revertedWith("Sale has not ended");
+        });
+
+        it("should revert if the caller has no contribution in the sale", async () => {
+            await increaseTime(3600);
+
+            await launchpad.endSale(1);
+
+            await expect(launchpad.connect(dave).claim(1)).to.be.revertedWith("Nothing to claim");
+        });
+
+        it("should correctly claim if softcap was not reached for native token", async () => {
+            await launchpad.connect(alice).contribute(1, 0, { value: ethers.utils.parseEther("1") });
+            await launchpad.connect(bob).contribute(1, 0, { value: ethers.utils.parseEther("1.2") });
+            await launchpad.connect(charlie).contribute(1, 0, { value: ethers.utils.parseEther("0.3") });
+
+            await increaseTime(3600);
+
+            await launchpad.endSale(1);
+
+            await expect(launchpad.connect(alice).claim(1)).to.changeEtherBalance(alice, ethers.utils.parseEther("1"));
+            await expect(launchpad.connect(bob).claim(1)).to.changeEtherBalance(bob, ethers.utils.parseEther("1.2"));
+            await expect(launchpad.connect(charlie).claim(1)).to.changeEtherBalance(charlie, ethers.utils.parseEther("0.3"));
+        });
+
+        it("should correctly claim if softcap was not reached for ERC20 token", async () => {
+            await launchpad.setPaymentTokenState(paymentToken.address, true);
+
+            const saleParams: SaleParams = {
+                token: soldToken.address,
+                paymentToken: paymentToken.address,
+                owner: deployer.address,
+                tokenAmount: ethers.utils.parseEther("100"),
+                price: ethers.utils.parseEther("1"),
+                softCap: ethers.utils.parseEther("20"),
+                hardCap: ethers.utils.parseEther("50"),
+                liquidityPercentage: 5000,
+                listingPrice: ethers.utils.parseEther("1"),
+                liquidityLockupTime: 365,
+                startTimestamp: (await getTime()) + 60,
+                endTimestamp: (await getTime()) + 3660,
+                refundType: true,
+                isVestedSale: false,
+                tgeUnlockPercentage: 0,
+                vestingStart: 0,
+                vestingDuration: 0,
+                vestingDurationUnits: DurationUnits.Days,
+            };
+
+            await createSale(saleParams);
+
+            await launchpad.enableSale(2);
+
+            await increaseTime(61);
+
+            await paymentToken.mint(alice.address, ethers.utils.parseEther("1"));
+            await paymentToken.connect(alice).approve(launchpad.address, ethers.utils.parseEther("1"));
+            await launchpad.connect(alice).contribute(2, ethers.utils.parseEther("1"));
+
+            await paymentToken.mint(bob.address, ethers.utils.parseEther("1.2"));
+            await paymentToken.connect(bob).approve(launchpad.address, ethers.utils.parseEther("1.2"));
+            await launchpad.connect(bob).contribute(2, ethers.utils.parseEther("1.2"));
+
+            await paymentToken.mint(charlie.address, ethers.utils.parseEther("0.3"));
+            await paymentToken.connect(charlie).approve(launchpad.address, ethers.utils.parseEther("0.3"));
+            await launchpad.connect(charlie).contribute(2, ethers.utils.parseEther("0.3"));
+
+            await increaseTime(3600);
+
+            await launchpad.endSale(2);
+
+            await expect(launchpad.connect(alice).claim(2)).to.changeTokenBalance(paymentToken, alice, ethers.utils.parseEther("1"));
+            await expect(launchpad.connect(bob).claim(2)).to.changeTokenBalance(paymentToken, bob, ethers.utils.parseEther("1.2"));
+            await expect(launchpad.connect(charlie).claim(2)).to.changeTokenBalance(paymentToken, charlie, ethers.utils.parseEther("0.3"));
+        });
+
+        describe("presale", () => {
+            it("should correctly claim if softcap was reached for native token", async () => {
+                const nanoAllocation = await launchpad.getTierAllocation(1, Tier.Nano);
+                const microTier = await launchpad.getTierAllocation(1, Tier.Micro);
+                const megaTier = await launchpad.getTierAllocation(1, Tier.Mega);
+
+                await launchpad.connect(alice).contribute(1, 0, { value: nanoAllocation });
+                await launchpad.connect(bob).contribute(1, 0, { value: microTier });
+                await launchpad.connect(charlie).contribute(1, 0, { value: megaTier });
+
+                await increaseTime(3600);
+
+                await launchpad.endSale(1);
+
+                const saleParams = (await launchpad.sales(1)).saleParams;
+
+                const expectedTokensAlice = nanoAllocation.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+                await expect(launchpad.connect(alice).claim(1)).to.changeTokenBalance(soldToken, alice, expectedTokensAlice);
+
+                const expectedTokensBob = microTier.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+                await expect(launchpad.connect(bob).claim(1)).to.changeTokenBalance(soldToken, bob, expectedTokensBob);
+
+                const expectedTokensCharlie = megaTier.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+                await expect(launchpad.connect(charlie).claim(1)).to.changeTokenBalance(soldToken, charlie, expectedTokensCharlie);
+            });
+
+            it("should correctly claim if softcap was reached for ERC20 token", async () => {
+                await launchpad.setPaymentTokenState(paymentToken.address, true);
+
+                const saleParams: SaleParams = {
+                    token: soldToken.address,
+                    paymentToken: paymentToken.address,
+                    owner: deployer.address,
+                    tokenAmount: ethers.utils.parseEther("100"),
+                    price: ethers.utils.parseEther("1"),
+                    softCap: ethers.utils.parseEther("20"),
+                    hardCap: ethers.utils.parseEther("50"),
+                    liquidityPercentage: 5000,
+                    listingPrice: ethers.utils.parseEther("1"),
+                    liquidityLockupTime: 365,
+                    startTimestamp: (await getTime()) + 60,
+                    endTimestamp: (await getTime()) + 3660,
+                    refundType: true,
+                    isVestedSale: false,
+                    tgeUnlockPercentage: 0,
+                    vestingStart: 0,
+                    vestingDuration: 0,
+                    vestingDurationUnits: DurationUnits.Days,
+                };
+
+                await createSale(saleParams);
+
+                await launchpad.enableSale(2);
+
+                await increaseTime(61);
+
+                const nanoAllocation = await launchpad.getTierAllocation(2, Tier.Nano);
+                const microTier = await launchpad.getTierAllocation(2, Tier.Micro);
+                const megaTier = await launchpad.getTierAllocation(2, Tier.Mega);
+
+                await paymentToken.mint(alice.address, nanoAllocation);
+                await paymentToken.connect(alice).approve(launchpad.address, nanoAllocation);
+                await launchpad.connect(alice).contribute(2, nanoAllocation);
+
+                await paymentToken.mint(bob.address, microTier);
+                await paymentToken.connect(bob).approve(launchpad.address, microTier);
+                await launchpad.connect(bob).contribute(2, microTier);
+
+                await paymentToken.mint(charlie.address, megaTier);
+                await paymentToken.connect(charlie).approve(launchpad.address, megaTier);
+                await launchpad.connect(charlie).contribute(2, megaTier);
+
+                await increaseTime(3600);
+
+                await launchpad.endSale(2);
+
+                const expectedTokensAlice = nanoAllocation.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+                await expect(launchpad.connect(alice).claim(2)).to.changeTokenBalance(soldToken, alice, expectedTokensAlice);
+
+                const expectedTokensBob = microTier.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+                await expect(launchpad.connect(bob).claim(2)).to.changeTokenBalance(soldToken, bob, expectedTokensBob);
+
+                const expectedTokensCharlie = megaTier.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+                await expect(launchpad.connect(charlie).claim(2)).to.changeTokenBalance(soldToken, charlie, expectedTokensCharlie);
+            });
+        });
+
+        it("should correctly claim for vested sale with tge unlock", async () => {
+            const saleParams: SaleParams = {
+                token: soldToken.address,
+                paymentToken: ethers.constants.AddressZero,
+                owner: deployer.address,
+                tokenAmount: ethers.utils.parseEther("100"),
+                price: ethers.utils.parseEther("1"),
+                softCap: ethers.utils.parseEther("20"),
+                hardCap: ethers.utils.parseEther("50"),
+                liquidityPercentage: 5000,
+                listingPrice: ethers.utils.parseEther("1"),
+                liquidityLockupTime: 365,
+                startTimestamp: (await getTime()) + 60,
+                endTimestamp: (await getTime()) + 3660,
+                refundType: true,
+                isVestedSale: true,
+                tgeUnlockPercentage: 2000,
+                vestingStart: 0,
+                vestingDuration: 10,
+                vestingDurationUnits: DurationUnits.Weeks,
+            };
+
+            await createSale(saleParams);
+
+            await launchpad.enableSale(2);
+
+            await increaseTime(61);
+
+            const nanoAllocation = await launchpad.getTierAllocation(2, Tier.Nano);
+            const microTier = await launchpad.getTierAllocation(2, Tier.Micro);
+            const megaTier = await launchpad.getTierAllocation(2, Tier.Mega);
+
+            await launchpad.connect(alice).contribute(2, 0, { value: nanoAllocation });
+            await launchpad.connect(bob).contribute(2, 0, { value: microTier });
+            await launchpad.connect(charlie).contribute(2, 0, { value: megaTier });
+
+            await increaseTime(3600);
+
+            await launchpad.endSale(2);
+
+            const expectedTokensAlice = nanoAllocation.mul(saleParams.price).div(ethers.utils.parseEther("1")).mul(2000).div(10000);
+            const expectedVestedTokensAlice = nanoAllocation.mul(saleParams.price).div(ethers.utils.parseEther("1")).sub(expectedTokensAlice);
+            await expect(launchpad.connect(alice).claim(2))
+                .to.changeTokenBalance(soldToken, alice, expectedTokensAlice)
+                .to.changeTokenBalance(soldToken, vesting, expectedVestedTokensAlice);
+            const aliceVestingSchedule = (await vesting.getVestingSchedules(soldToken.address, alice.address))[0];
+            expect(aliceVestingSchedule.start).to.eq((await getTime()) + saleParams.vestingStart);
+            expect(aliceVestingSchedule.amountTotal).to.eq(expectedVestedTokensAlice);
+            expect(aliceVestingSchedule.duration).to.eq(saleParams.vestingDuration);
+            expect(aliceVestingSchedule.durationUnits).to.eq(saleParams.vestingDurationUnits);
+
+            const expectedTokensBob = microTier.mul(saleParams.price).div(ethers.utils.parseEther("1")).mul(2000).div(10000);
+            const expectedVestedTokensBob = microTier.mul(saleParams.price).div(ethers.utils.parseEther("1")).sub(expectedTokensBob);
+            await expect(launchpad.connect(bob).claim(2))
+                .to.changeTokenBalance(soldToken, bob, expectedTokensBob)
+                .to.changeTokenBalance(soldToken, vesting, expectedVestedTokensBob);
+            const bobVestingSchedule = (await vesting.getVestingSchedules(soldToken.address, bob.address))[0];
+            expect(bobVestingSchedule.amountTotal).to.eq(expectedVestedTokensBob);
+
+            const expectedTokensCharlie = megaTier.mul(saleParams.price).div(ethers.utils.parseEther("1")).mul(2000).div(10000);
+            const expectedVestedTokensCharlie = megaTier.mul(saleParams.price).div(ethers.utils.parseEther("1")).sub(expectedTokensCharlie);
+            await expect(launchpad.connect(charlie).claim(2))
+                .to.changeTokenBalance(soldToken, charlie, expectedTokensCharlie)
+                .to.changeTokenBalance(soldToken, vesting, expectedVestedTokensCharlie);
+            const charlieVestingSchedule = (await vesting.getVestingSchedules(soldToken.address, charlie.address))[0];
+            expect(charlieVestingSchedule.amountTotal).to.eq(expectedVestedTokensCharlie);
+        });
+
+        it("should correctly claim for vested sale without tge unlock", async () => {
+            const saleParams: SaleParams = {
+                token: soldToken.address,
+                paymentToken: ethers.constants.AddressZero,
+                owner: deployer.address,
+                tokenAmount: ethers.utils.parseEther("100"),
+                price: ethers.utils.parseEther("1"),
+                softCap: ethers.utils.parseEther("20"),
+                hardCap: ethers.utils.parseEther("50"),
+                liquidityPercentage: 5000,
+                listingPrice: ethers.utils.parseEther("1"),
+                liquidityLockupTime: 365,
+                startTimestamp: (await getTime()) + 60,
+                endTimestamp: (await getTime()) + 3660,
+                refundType: true,
+                isVestedSale: true,
+                tgeUnlockPercentage: 0,
+                vestingStart: 0,
+                vestingDuration: 10,
+                vestingDurationUnits: DurationUnits.Weeks,
+            };
+
+            await createSale(saleParams);
+
+            await launchpad.enableSale(2);
+
+            await increaseTime(61);
+
+            const nanoAllocation = await launchpad.getTierAllocation(2, Tier.Nano);
+            const microTier = await launchpad.getTierAllocation(2, Tier.Micro);
+            const megaTier = await launchpad.getTierAllocation(2, Tier.Mega);
+
+            await launchpad.connect(alice).contribute(2, 0, { value: nanoAllocation });
+            await launchpad.connect(bob).contribute(2, 0, { value: microTier });
+            await launchpad.connect(charlie).contribute(2, 0, { value: megaTier });
+
+            await increaseTime(3600);
+
+            await launchpad.endSale(2);
+
+            const expectedVestedTokensAlice = nanoAllocation.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+            await expect(launchpad.connect(alice).claim(2)).to.changeTokenBalance(soldToken, vesting, expectedVestedTokensAlice);
+            const aliceVestingSchedule = (await vesting.getVestingSchedules(soldToken.address, alice.address))[0];
+            expect(aliceVestingSchedule.start).to.eq((await getTime()) + saleParams.vestingStart);
+            expect(aliceVestingSchedule.amountTotal).to.eq(expectedVestedTokensAlice);
+            expect(aliceVestingSchedule.duration).to.eq(saleParams.vestingDuration);
+            expect(aliceVestingSchedule.durationUnits).to.eq(saleParams.vestingDurationUnits);
+
+            const expectedVestedTokensBob = microTier.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+            await expect(launchpad.connect(bob).claim(2)).to.changeTokenBalance(soldToken, vesting, expectedVestedTokensBob);
+            const bobVestingSchedule = (await vesting.getVestingSchedules(soldToken.address, bob.address))[0];
+            expect(bobVestingSchedule.amountTotal).to.eq(expectedVestedTokensBob);
+
+            const expectedVestedTokensCharlie = megaTier.mul(saleParams.price).div(ethers.utils.parseEther("1"));
+            await expect(launchpad.connect(charlie).claim(2)).to.changeTokenBalance(soldToken, vesting, expectedVestedTokensCharlie);
+            const charlieVestingSchedule = (await vesting.getVestingSchedules(soldToken.address, charlie.address))[0];
+            expect(charlieVestingSchedule.amountTotal).to.eq(expectedVestedTokensCharlie);
+        });
+
+        describe("fairlaunch", () => {
+            it("should correctly claim for fairlaunch with erc20 token", async () => {
+                await launchpad.setPaymentTokenState(paymentToken.address, true);
+
+                const saleParams: SaleParams = {
+                    token: soldToken.address,
+                    paymentToken: paymentToken.address,
+                    owner: deployer.address,
+                    tokenAmount: ethers.utils.parseEther("100"),
+                    price: ethers.utils.parseEther("0"),
+                    softCap: ethers.utils.parseEther("20"),
+                    hardCap: ethers.utils.parseEther("50"),
+                    liquidityPercentage: 5000,
+                    listingPrice: ethers.utils.parseEther("1"),
+                    liquidityLockupTime: 365,
+                    startTimestamp: (await getTime()) + 60,
+                    endTimestamp: (await getTime()) + 3660,
+                    refundType: true,
+                    isVestedSale: false,
+                    tgeUnlockPercentage: 0,
+                    vestingStart: 0,
+                    vestingDuration: 0,
+                    vestingDurationUnits: DurationUnits.Days,
+                };
+
+                await createSale(saleParams);
+
+                await launchpad.enableSale(2);
+
+                await increaseTime(61);
+
+                await paymentToken.mint(alice.address, ethers.utils.parseEther("10"));
+                await paymentToken.connect(alice).approve(launchpad.address, ethers.utils.parseEther("10"));
+                await launchpad.connect(alice).contribute(2, ethers.utils.parseEther("10"));
+
+                await paymentToken.mint(bob.address, ethers.utils.parseEther("12"));
+                await paymentToken.connect(bob).approve(launchpad.address, ethers.utils.parseEther("12"));
+                await launchpad.connect(bob).contribute(2, ethers.utils.parseEther("12"));
+
+                await paymentToken.mint(charlie.address, ethers.utils.parseEther("3"));
+                await paymentToken.connect(charlie).approve(launchpad.address, ethers.utils.parseEther("3"));
+                await launchpad.connect(charlie).contribute(2, ethers.utils.parseEther("3"));
+
+                await increaseTime(3600);
+
+                await launchpad.endSale(2);
+
+                const totalContributions = ethers.utils.parseEther("25");
+
+                const expectedTokensAlice = ethers.utils.parseEther("100").mul(ethers.utils.parseEther("10")).div(totalContributions);
+                await expect(launchpad.connect(alice).claim(2)).to.changeTokenBalance(soldToken, alice, expectedTokensAlice);
+
+                const expectedTokensBob = ethers.utils.parseEther("100").mul(ethers.utils.parseEther("12")).div(totalContributions);
+                await expect(launchpad.connect(bob).claim(2)).to.changeTokenBalance(soldToken, bob, expectedTokensBob);
+
+                const expectedTokensCharlie = ethers.utils.parseEther("100").mul(ethers.utils.parseEther("3")).div(totalContributions);
+                await expect(launchpad.connect(charlie).claim(2)).to.changeTokenBalance(soldToken, charlie, expectedTokensCharlie);
+            });
+
+            it("should correctly claim for fairlaunch with eth", async () => {
+                const saleParams: SaleParams = {
+                    token: soldToken.address,
+                    paymentToken: ethers.constants.AddressZero,
+                    owner: deployer.address,
+                    tokenAmount: ethers.utils.parseEther("100"),
+                    price: ethers.utils.parseEther("0"),
+                    softCap: ethers.utils.parseEther("20"),
+                    hardCap: ethers.utils.parseEther("50"),
+                    liquidityPercentage: 5000,
+                    listingPrice: ethers.utils.parseEther("1"),
+                    liquidityLockupTime: 365,
+                    startTimestamp: (await getTime()) + 60,
+                    endTimestamp: (await getTime()) + 3660,
+                    refundType: true,
+                    isVestedSale: false,
+                    tgeUnlockPercentage: 0,
+                    vestingStart: 0,
+                    vestingDuration: 0,
+                    vestingDurationUnits: DurationUnits.Days,
+                };
+
+                await createSale(saleParams);
+
+                await launchpad.enableSale(2);
+
+                await increaseTime(61);
+
+                await launchpad.connect(alice).contribute(2, 0, { value: ethers.utils.parseEther("10") });
+                await launchpad.connect(bob).contribute(2, 0, { value: ethers.utils.parseEther("12") });
+                await launchpad.connect(charlie).contribute(2, 0, { value: ethers.utils.parseEther("3") });
+
+                await increaseTime(3600);
+
+                await launchpad.endSale(2);
+
+                const totalContributions = ethers.utils.parseEther("25");
+
+                const expectedTokensAlice = ethers.utils.parseEther("100").mul(ethers.utils.parseEther("10")).div(totalContributions);
+                await expect(launchpad.connect(alice).claim(2)).to.changeTokenBalance(soldToken, alice, expectedTokensAlice);
+
+                const expectedTokensBob = ethers.utils.parseEther("100").mul(ethers.utils.parseEther("12")).div(totalContributions);
+                await expect(launchpad.connect(bob).claim(2)).to.changeTokenBalance(soldToken, bob, expectedTokensBob);
+
+                const expectedTokensCharlie = ethers.utils.parseEther("100").mul(ethers.utils.parseEther("3")).div(totalContributions);
+                await expect(launchpad.connect(charlie).claim(2)).to.changeTokenBalance(soldToken, charlie, expectedTokensCharlie);
+            });
+        });
+    });
+
+    describe("withdrawFee", () => {
+        beforeEach(async () => {
+            await stake(alice, tierLimits.nano);
+            await stake(bob, tierLimits.micro);
+            await stake(charlie, tierLimits.mega);
+
+            const saleParams: SaleParams = {
+                token: soldToken.address,
+                paymentToken: ethers.constants.AddressZero,
+                owner: deployer.address,
+                tokenAmount: ethers.utils.parseEther("100"),
+                price: ethers.utils.parseEther("1"),
+                softCap: ethers.utils.parseEther("20"),
+                hardCap: ethers.utils.parseEther("50"),
+                liquidityPercentage: 5000,
+                listingPrice: ethers.utils.parseEther("1"),
+                liquidityLockupTime: 365,
+                startTimestamp: (await getTime()) + 60,
+                endTimestamp: (await getTime()) + 3660,
+                refundType: false,
+                isVestedSale: false,
+                tgeUnlockPercentage: 0,
+                vestingStart: 0,
+                vestingDuration: 0,
+                vestingDurationUnits: DurationUnits.Days,
+            };
+
+            await createSale(saleParams);
+
+            await launchpad.enableSale(1);
+
+            await increaseTime(61);
+
+            const aliceAllocation = await launchpad.getTierAllocation(1, await stakingRouter.getTier(alice.address));
+            await launchpad.connect(alice).contribute(1, 0, { value: aliceAllocation });
+
+            const bobAllocation = await launchpad.getTierAllocation(1, await stakingRouter.getTier(bob.address));
+            await launchpad.connect(bob).contribute(1, 0, { value: bobAllocation });
+
+            const charlieAllocation = await launchpad.getTierAllocation(1, await stakingRouter.getTier(charlie.address));
+            await launchpad.connect(charlie).contribute(1, 0, { value: charlieAllocation });
+
+            await increaseTime(3600);
+            await launchpad.endSale(1);
+        });
+
+        it("should revert if caller does not have admin role", async () => {
+            await expect(launchpad.connect(alice).withdrawFee(ethers.constants.AddressZero, ethers.utils.parseEther("1"))).to.be.reverted;
+        });
+
+        it("should revert if amount is greater than balance", async () => {
+            await expect(launchpad.withdrawFee(ethers.constants.AddressZero, ethers.utils.parseEther("100"))).to.be.revertedWith(
+                "Amount exceeds fee pool balance"
+            );
+        });
+
+        it("should correctly withdraw fee for native token", async () => {
+            const plsAvaialbleForWithdrawal = await launchpad.feePool(ethers.constants.AddressZero);
+            await expect(launchpad.withdrawFee(ethers.constants.AddressZero, plsAvaialbleForWithdrawal)).to.changeEtherBalance(
+                deployer,
+                plsAvaialbleForWithdrawal
+            );
+        });
+
+        it("should correctly withdraw fee for erc20 token", async () => {
+            const saleParams: SaleParams = {
+                token: soldToken.address,
+                paymentToken: paymentToken.address,
+                owner: deployer.address,
+                tokenAmount: ethers.utils.parseEther("100"),
+                price: ethers.utils.parseEther("1"),
+                softCap: ethers.utils.parseEther("20"),
+                hardCap: ethers.utils.parseEther("50"),
+                liquidityPercentage: 5000,
+                listingPrice: ethers.utils.parseEther("1"),
+                liquidityLockupTime: 365,
+                startTimestamp: (await getTime()) + 60,
+                endTimestamp: (await getTime()) + 3660,
+                refundType: false,
+                isVestedSale: false,
+                tgeUnlockPercentage: 0,
+                vestingStart: 0,
+                vestingDuration: 0,
+                vestingDurationUnits: DurationUnits.Days,
+            };
+
+            await launchpad.setPaymentTokenState(paymentToken.address, true);
+
+            await createSale(saleParams);
+
+            await launchpad.enableSale(2);
+
+            await increaseTime(61);
+
+            const aliceAllocation = await launchpad.getTierAllocation(2, await stakingRouter.getTier(alice.address));
+            await paymentToken.mint(alice.address, aliceAllocation);
+            await paymentToken.connect(alice).approve(launchpad.address, aliceAllocation);
+            await launchpad.connect(alice).contribute(2, aliceAllocation);
+
+            const bobAllocation = await launchpad.getTierAllocation(2, await stakingRouter.getTier(bob.address));
+            await paymentToken.mint(bob.address, bobAllocation);
+            await paymentToken.connect(bob).approve(launchpad.address, bobAllocation);
+            await launchpad.connect(bob).contribute(2, bobAllocation);
+
+            const charlieAllocation = await launchpad.getTierAllocation(2, await stakingRouter.getTier(charlie.address));
+            await paymentToken.mint(charlie.address, charlieAllocation);
+            await paymentToken.connect(charlie).approve(launchpad.address, charlieAllocation);
+            await launchpad.connect(charlie).contribute(2, charlieAllocation);
+
+            await increaseTime(3600);
+            await launchpad.endSale(2);
+
+            const plsAvaialbleForWithdrawal = await launchpad.feePool(paymentToken.address);
+            await expect(launchpad.withdrawFee(paymentToken.address, plsAvaialbleForWithdrawal)).to.changeTokenBalance(
+                paymentToken,
+                deployer,
+                plsAvaialbleForWithdrawal
+            );
         });
     });
 });
