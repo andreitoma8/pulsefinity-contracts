@@ -175,7 +175,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             tokensForLiquidity = (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000))
                 * _saleParams.liquidityPercentage / 10000;
         } else {
-            tokensForLiquidity = (totalTokensForSale - (totalTokensForSale * WINNER_FEE / 10000))
+            tokensForLiquidity = (_saleParams.hardCap - (_saleParams.hardCap * WINNER_FEE / 10000))
                 * _saleParams.liquidityPercentage * 1e18 / _saleParams.listingPrice / 10000;
         }
         sales[saleId].totalTokensForLiquidity = tokensForLiquidity;
