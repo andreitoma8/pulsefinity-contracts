@@ -675,8 +675,8 @@ describe("Launchpad", () => {
             expect(saleState.softCapReached).to.eq(true);
 
             const availableSoldTokens = saleParams.hardCap.mul(saleParams.price).div(toWei("1"));
-            const availableTokensForLiquidity = availableSoldTokens
-                .sub(availableSoldTokens.mul(await launchpad.WINNER_FEE()).div(10000))
+            const availableTokensForLiquidity = saleParams.hardCap
+                .sub(saleParams.hardCap.mul(await launchpad.WINNER_FEE()).div(10000))
                 .mul(saleParams.liquidityPercentage)
                 .mul(toWei("1"))
                 .div(10000)
@@ -739,8 +739,8 @@ describe("Launchpad", () => {
             expect(saleState.softCapReached).to.eq(true);
 
             const availableSoldTokens = saleParams2.hardCap.mul(saleParams2.price).div(toWei("1"));
-            const availableTokensForLiquidity = availableSoldTokens
-                .sub(availableSoldTokens.mul(await launchpad.WINNER_FEE()).div(10000))
+            const availableTokensForLiquidity = saleParams2.hardCap
+                .sub(saleParams2.hardCap.mul(await launchpad.WINNER_FEE()).div(10000))
                 .mul(saleParams2.liquidityPercentage)
                 .mul(toWei("1"))
                 .div(10000)
@@ -799,8 +799,8 @@ describe("Launchpad", () => {
             expect(saleState.softCapReached).to.eq(true);
 
             const availableSoldTokens = saleParams2.hardCap.mul(saleParams2.price).div(toWei("1"));
-            const availableTokensForLiquidity = availableSoldTokens
-                .sub(availableSoldTokens.mul(await launchpad.WINNER_FEE()).div(10000))
+            const availableTokensForLiquidity = saleParams2.hardCap
+                .sub(saleParams2.hardCap.mul(await launchpad.WINNER_FEE()).div(10000))
                 .mul(saleParams2.liquidityPercentage)
                 .mul(toWei("1"))
                 .div(10000)

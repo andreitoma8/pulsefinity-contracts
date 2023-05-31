@@ -23,6 +23,7 @@ contract MockPulseX {
         _createPair(token, WPLS_);
         MockERC20 pair = MockERC20(pairs[token][WPLS_]);
         pair.mint(msg.sender, 1e18);
+        return (amountTokenDesired, msg.value, 1e18);
     }
 
     function addLiquidity(
@@ -40,6 +41,7 @@ contract MockPulseX {
         _createPair(tokenA, tokenB);
         MockERC20 pair = MockERC20(pairs[tokenA][tokenB]);
         pair.mint(to, 1e18);
+        return (amountADesired, amountBDesired, 1e18);
     }
 
     function factory() external view returns (address) {

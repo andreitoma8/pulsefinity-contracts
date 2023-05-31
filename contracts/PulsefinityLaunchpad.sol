@@ -325,7 +325,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
             uint256 tokensForLiquidity;
 
             if (saleParams.price == 0) {
-                tokensForLiquidity = saleParams.tokenAmount;
+                tokensForLiquidity = sale.totalTokensForLiquidity;
             } else {
                 tokensForLiquidity =
                     raisedAfterFee * saleParams.liquidityPercentage * 1e18 / 10000 / saleParams.listingPrice;
@@ -333,24 +333,27 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
 
             // Approve and add liquidity to the pool on PulseX
             saleParams.token.approve(address(pulseXRouter), tokensForLiquidity);
+            uint256 liquidity;
+            uint256 amountA;
+            uint256 amountB;
             if (address(saleParams.paymentToken) != address(0)) {
                 saleParams.paymentToken.approve(address(pulseXRouter), paymentTokenForLiquidity);
-                pulseXRouter.addLiquidity(
+                (amountA, amountB, liquidity) = pulseXRouter.addLiquidity(
                     address(saleParams.token),
                     address(saleParams.paymentToken),
                     tokensForLiquidity,
                     paymentTokenForLiquidity,
-                    tokensForLiquidity,
-                    paymentTokenForLiquidity,
+                    tokensForLiquidity / 2,
+                    paymentTokenForLiquidity / 2,
                     address(this),
                     block.timestamp + 1 days
                 );
             } else {
-                pulseXRouter.addLiquidityETH{value: paymentTokenForLiquidity}(
+                (amountA, amountB, liquidity) = pulseXRouter.addLiquidityETH{value: paymentTokenForLiquidity}(
                     address(saleParams.token),
                     tokensForLiquidity,
-                    tokensForLiquidity,
-                    paymentTokenForLiquidity,
+                    tokensForLiquidity / 2,
+                    paymentTokenForLiquidity / 2,
                     address(this),
                     block.timestamp + 1 days
                 );
@@ -362,7 +365,6 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
                 address(saleParams.token),
                 address(saleParams.paymentToken) == address(0) ? pulseXRouter.WPLS() : address(saleParams.paymentToken)
             );
-            uint256 liquidity = IERC20(liquidityPool).balanceOf(address(this));
             IERC20(liquidityPool).approve(address(vestingContract), liquidity);
             vestingContract.createVestingSchedule(
                 liquidityPool,
@@ -379,7 +381,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
                 uint256 totalTokensBought = sale.totalPaymentTokenContributed * saleParams.price / 1e18;
                 uint256 refundAmount = sale.totalTokensSold - totalTokensBought;
                 // Calculate the amount of tokens to refund from unused tokens for liquidity
-                uint256 refundForLiquidity = sale.totalTokensForLiquidity - tokensForLiquidity;
+                uint256 refundForLiquidity = sale.totalTokensForLiquidity - amountA;
                 refundAmount += refundForLiquidity;
                 // If the refund amount is greater than 0, refund the owner or burn the tokens(if refundType is false,
                 // sending to address 0xdead for burn in case the token is not burnable or does not allow transfers to 0x0)
@@ -391,7 +393,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
                 }
             }
             // Send the raised funds to the owner
-            uint256 fundsToSend = raisedAfterFee - paymentTokenForLiquidity;
+            uint256 fundsToSend = raisedAfterFee - amountB;
 
             if (address(saleParams.paymentToken) != address(0)) {
                 saleParams.paymentToken.transfer(saleParams.owner, fundsToSend);
@@ -484,6 +486,8 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         require(_saleParams.startTimestamp > block.timestamp, "Start timestamp must be in the future");
         require(_saleParams.endTimestamp > _saleParams.startTimestamp, "End timestamp must be after start timestamp");
     }
+
+    receive() external payable {}
 
     /**
      * @notice This function is used to upgrade the contract
