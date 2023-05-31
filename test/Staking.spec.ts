@@ -6,13 +6,13 @@ import { BigNumber } from "ethers";
 import { upgrades } from "hardhat";
 import { LockType, Tier } from "./helpers/interfaces";
 
-import { PulsefinityStakingPool, StakingRouter, MockERC20 } from "../typechain-types";
+import { PulsefinityStakingPool, PulsefinityStakingRouter, MockERC20 } from "../typechain-types";
 
 chai.use(chaiAsPromised);
 
 describe("Staking", () => {
     let stakingPool: PulsefinityStakingPool;
-    let stakingRouter: StakingRouter;
+    let stakingRouter: PulsefinityStakingRouter;
     let pulsefinity: MockERC20;
     let rewardToken: MockERC20;
 
@@ -65,8 +65,8 @@ describe("Staking", () => {
         pulsefinity = await MockERC20Factory.deploy("Pulsefinity", "PULSE");
         rewardToken = await MockERC20Factory.deploy("Reward Token", "REWARD");
 
-        const StakingRouterFactory = await ethers.getContractFactory("StakingRouter");
-        stakingRouter = (await upgrades.deployProxy(StakingRouterFactory, [pulsefinity.address, tierLimits], { kind: "uups" })) as StakingRouter;
+        const StakingRouterFactory = await ethers.getContractFactory("PulsefinityStakingRouter");
+        stakingRouter = (await upgrades.deployProxy(StakingRouterFactory, [pulsefinity.address, tierLimits], { kind: "uups" })) as PulsefinityStakingRouter;
 
         stakingPool = await deployPool(rewardToken.address, Tier.Nano);
 
@@ -427,7 +427,7 @@ describe("Staking", () => {
         });
     });
 
-    describe("StakingRouter", () => {
+    describe("PulsefinityStakingRouter", () => {
         let stakingPool2: PulsefinityStakingPool;
         let stakingPool3: PulsefinityStakingPool;
 

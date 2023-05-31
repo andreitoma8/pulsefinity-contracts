@@ -7,7 +7,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IStakingRouter.sol";
 import "./interfaces/IStakingPool.sol";
 
-contract StakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
+contract PulsefinityStakingRouter is IStakingRouter, OwnableUpgradeable, UUPSUpgradeable {
     IERC20 public pulsefinityToken;
     IStakingPool[] public stakingPools;
 

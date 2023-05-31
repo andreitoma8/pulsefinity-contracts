@@ -6,14 +6,14 @@ import { upgrades } from "hardhat";
 import { BigNumber } from "ethers";
 import { LockType, Tier, SaleParams, SaleState, DurationUnits } from "./helpers/interfaces";
 
-import { PulsefinityLaunchpad, PulsefinityStakingPool, StakingRouter, VestingContract, MockERC20, MockPulseX } from "../typechain-types";
+import { PulsefinityLaunchpad, PulsefinityStakingPool, PulsefinityStakingRouter, VestingContract, MockERC20, MockPulseX } from "../typechain-types";
 
 chai.use(chaiAsPromised);
 
 describe("Launchpad", () => {
     let launchpad: PulsefinityLaunchpad;
     let stakingPool: PulsefinityStakingPool;
-    let stakingRouter: StakingRouter;
+    let stakingRouter: PulsefinityStakingRouter;
     let vesting: VestingContract;
 
     let pulsefinity: MockERC20;
@@ -122,8 +122,8 @@ describe("Launchpad", () => {
         const MockPulseXFactory = await ethers.getContractFactory("MockPulseX");
         pulseX = await MockPulseXFactory.deploy(wplsAddress);
 
-        const StakingRouterFactory = await ethers.getContractFactory("StakingRouter");
-        stakingRouter = (await upgrades.deployProxy(StakingRouterFactory, [pulsefinity.address, tierLimits], { kind: "uups" })) as StakingRouter;
+        const StakingRouterFactory = await ethers.getContractFactory("PulsefinityStakingRouter");
+        stakingRouter = (await upgrades.deployProxy(StakingRouterFactory, [pulsefinity.address, tierLimits], { kind: "uups" })) as PulsefinityStakingRouter;
 
         const PulsefinityStakingPoolFactory = await ethers.getContractFactory("PulsefinityStakingPool");
         stakingPool = (await upgrades.deployProxy(PulsefinityStakingPoolFactory, [pulsefinity.address, rewardToken.address, stakingRouter.address, Tier.Nano], {
