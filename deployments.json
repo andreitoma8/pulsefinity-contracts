@@ -1,6 +1,12 @@
 {
-    "vestingContract": "",
-    "stakingRouter": "",
-    "launchPad": "",
-    "stakingPools": []
+    "vestingContract": "0x0528Fb4DFA89BC9261888002C485C2a5C134C181",
+    "stakingRouter": "0x051e42052bd1ac8510B9aEf638E5e3eB33b04b47",
+    "launchPad": "0xd7Fd60170F4CabfD96c86184Db14D2C1D8FFe422",
+    "stakingPools": [
+        {
+            "address": "0x98C3946028ab14a9A543F2C1F34fA0D2B9d25F40",
+            "rewardTokenAddress": "0x6d1D0E083EF7C25BcBEdC900DEB0becD57C44E3e",
+            "minTier": ""
+        }
+    ]
 }

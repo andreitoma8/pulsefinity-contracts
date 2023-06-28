@@ -51,17 +51,17 @@ const config: HardhatUserConfig = {
         localhost: {
             url: "http://127.0.0.1:8545",
         },
-        sepolia: {
-            chainId: 11155111,
-            url: process.env.ETH_SEPOLIA_URL || "",
+        pulsechaintestnet: {
+            chainId: 943,
+            url: process.env.PULSECHAINTESTNET_RPC_URL || "",
             accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-            gasPrice: NETWORK_GAS_PRICE["sepolia"] || "auto",
+            gasPrice: "auto",
         },
-        main: {
-            chainId: 1,
-            url: process.env.ETH_MAINNET_URL || "",
+        pulsechain: {
+            chainId: 369,
+            url: process.env.PULSECHAIN_RPC_URL || "",
             accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-            gasPrice: NETWORK_GAS_PRICE["mainnet"] || "auto",
+            gasPrice: "auto",
         },
     },
     gasReporter: {
@@ -78,10 +78,27 @@ const config: HardhatUserConfig = {
     },
     etherscan: {
         apiKey: {
-            mainnet: process.env.ETHERSCAN_API_KEY || "",
-            sepolia: process.env.ETHERSCAN_API_KEY || "",
+            pulsechaintestnet: '0',
+            pulsechain: '0',
         },
+        customChains: [],
     },
 };
+
+const { chainConfig } = require("@nomiclabs/hardhat-etherscan/dist/src/ChainConfig");
+chainConfig['pulsechaintestnet'] = {
+  chainId: 943,
+  urls: {
+    apiURL: "https://scan.v4.testnet.pulsechain.com/api",
+    browserURL: "https://scan.v4.testnet.pulsechain.com",
+  },
+}
+chainConfig['pulsechain'] = {
+    chainId: 369,
+    urls: {
+      apiURL: "https://scan.pulsechain.com/api",
+      browserURL: "https://scan.pulsechain.com",
+    },
+}
 
 export default config;

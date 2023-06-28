@@ -21,9 +21,9 @@ export enum Tier {
 }
 
 // TO RUN THIS SCRIPT ADD THE REWARD TOKEN ADDRESS TO THE VARIABLE BELOW
-const rewardTokenAddress = "";
+const rewardTokenAddress = "0x6d1D0E083EF7C25BcBEdC900DEB0becD57C44E3e";
 // TO RUN THIS SCRIPT ADD THE MINIMUM TIER TO THE VARIABLE BELOW
-const minTier = Tier.Nano;
+const minTier = Tier.Null;
 
 async function main() {
     const [deployer] = await ethers.getSigners();
@@ -65,3 +65,7 @@ async function main() {
 
     fs.writeFileSync("deployments.json", JSON.stringify(existingDeployments, null, 4));
 }
+main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});
