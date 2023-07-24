@@ -4,16 +4,16 @@ const toWei = (amount: string) => ethers.utils.parseEther(amount);
 
 const helperconfig = {
     // The address of the Pulsefinity token
-    pulsefinityAddress: "0x6d1D0E083EF7C25BcBEdC900DEB0becD57C44E3e",
+    pulsefinityAddress: "0x33f687901720336f1947cF5c4E0804308AE57A99",
     // The amount of tokens needed to be staked to reach each tier
     // Only change the values in quotes
     tierLimits: {
-        nano: toWei("10"),
-        micro: toWei("20"),
-        mega: toWei("30"),
-        giga: toWei("40"),
-        tera: toWei("50"),
-        teraPlus: toWei("60"),
+        nano: toWei("100"),
+        micro: toWei("800"),
+        mega: toWei("2000"),
+        giga: toWei("6000"),
+        tera: toWei("10000"),
+        teraPlus: toWei("10001"),
     },
     // The address of the pulseX router contract
     pulseXRouterAddress: "0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02",
