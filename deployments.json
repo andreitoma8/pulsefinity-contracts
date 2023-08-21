@@ -1,11 +1,56 @@
 {
-    "vestingContract": "0x9F876248FB3d333f51893ec4FaCAEcEDf87f89A6",
-    "stakingRouter": "0x641BFEdDC36bCf4d5FAE269f7726385BA42B0F98",
-    "launchPad": "0xeDAE2429D9Aec814FD1B5367E085A70304358F69",
+    "vestingContract": "0xAd2Cdd20a244A632FF4AB3dEE78248e92B8eb61E",
+    "stakingRouter": "0x21f61B60fa2D196748151044128e3848f62B0834",
+    "launchPad": "0x869D528bad60626ab0676808c0271358ad5331F7",
     "stakingPools": [
         {
             "address": "0x16E2ADc9d0D898d3046E07DcF711dc1039A4857C",
             "rewardTokenAddress": "0x33f687901720336f1947cF5c4E0804308AE57A99",
+            "minTier": ""
+        },
+        {
+            "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0xa1701cD0D0c90a4D18e85fe7B2fb795E15B8fAFB",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0x2819824221cE7cbef6b5dD84d24CFD265483B5c3",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0x2819824221cE7cbef6b5dD84d24CFD265483B5c3",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0x2819824221cE7cbef6b5dD84d24CFD265483B5c3",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0x2819824221cE7cbef6b5dD84d24CFD265483B5c3",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0x2819824221cE7cbef6b5dD84d24CFD265483B5c3",
+            "rewardTokenAddress": "0x54e56D8FEfD66840192809d147dd5eaacba5F5EB",
+            "minTier": ""
+        },
+        {
+            "address": "0x0146557bE10C1cB4e035AB21c1e129B5C1bDAA90",
+            "rewardTokenAddress": "0xe6Eea3fC1b0B850C888C26cf803Ab862A9cC481B",
             "minTier": ""
         }
     ]

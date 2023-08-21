@@ -4,7 +4,7 @@ const toWei = (amount: string) => ethers.utils.parseEther(amount);
 
 const helperconfig = {
     // The address of the Pulsefinity token
-    pulsefinityAddress: "0x33f687901720336f1947cF5c4E0804308AE57A99",
+    pulsefinityAddress: "0xe6Eea3fC1b0B850C888C26cf803Ab862A9cC481B",
     // The amount of tokens needed to be staked to reach each tier
     // Only change the values in quotes
     tierLimits: {

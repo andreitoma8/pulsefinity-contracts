@@ -453,7 +453,7 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
      * @param _buyerTier The tier of the buyer
      */
     function getTierAllocation(uint256 _saleId, Tier _buyerTier) public view returns (uint256) {
-        if (_buyerTier == Tier.Null || stakingRouter.getStakersForTier(_buyerTier) == 0) {
+        /*if (_buyerTier == Tier.Null || stakingRouter.getStakersForTier(_buyerTier) == 0) {
             return 0;
         }
         uint256[6] memory stakersPerTier = stakingRouter.getStakersPerTier();
@@ -461,7 +461,23 @@ contract PulsefinityLaunchpad is AccessControlUpgradeable, UUPSUpgradeable {
         for (uint256 i = 0; i < stakersPerTier.length; i++) {
             totalAllocationShares += stakersPerTier[i] * tierWeights[Tier(i + 1)];
         }
-        return sales[_saleId].saleParams.hardCap * tierWeights[_buyerTier] / totalAllocationShares;
+        return sales[_saleId].saleParams.hardCap * tierWeights[_buyerTier] / totalAllocationShares;*/
+        uint256 hardCap = sales[_saleId].saleParams.hardCap;
+        if (_buyerTier == Tier.Null)
+            return hardCap * 2 / 100;
+        if (_buyerTier == Tier.Nano)
+            return hardCap * 4 / 100;
+        if (_buyerTier == Tier.Micro)
+            return hardCap * 8 / 100;
+        if (_buyerTier == Tier.Mega)
+            return hardCap * 12 / 100;
+        if (_buyerTier == Tier.Giga)
+            return hardCap * 15 / 100;
+        if (_buyerTier == Tier.Tera)
+            return hardCap * 20 / 100;
+        if (_buyerTier == Tier.TeraPlus)
+            return hardCap * 25 / 100;
+        return 0;
     }
 
     /**
