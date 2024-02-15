@@ -1,7 +1,7 @@
 {
-    "vestingContract": "0xAd2Cdd20a244A632FF4AB3dEE78248e92B8eb61E",
-    "stakingRouter": "0x21f61B60fa2D196748151044128e3848f62B0834",
-    "launchPad": "0x869D528bad60626ab0676808c0271358ad5331F7",
+    "vestingContract": "0x9F876248FB3d333f51893ec4FaCAEcEDf87f89A6",
+    "stakingRouter": "0x641BFEdDC36bCf4d5FAE269f7726385BA42B0F98",
+    "launchPad": "0xC8d616816Ac36fe217E61e452F170fe4737F2763",
     "stakingPools": [
         {
             "address": "0x16E2ADc9d0D898d3046E07DcF711dc1039A4857C",
@@ -51,6 +51,16 @@
         {
             "address": "0x0146557bE10C1cB4e035AB21c1e129B5C1bDAA90",
             "rewardTokenAddress": "0xe6Eea3fC1b0B850C888C26cf803Ab862A9cC481B",
+            "minTier": ""
+        },
+        {
+            "address": "0x2C190a7E590b84Ec6F1E092f13F859eD455F378C",
+            "rewardTokenAddress": "0x41Ff71a99D7744cc5e62418d59774e19e30F7426",
+            "minTier": ""
+        },
+        {
+            "address": "0x04a3F1058568996d7e04BC5cBfbd08787622C79D",
+            "rewardTokenAddress": "0x41Ff71a99D7744cc5e62418d59774e19e30F7426",
             "minTier": ""
         }
     ]
